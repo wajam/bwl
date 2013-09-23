@@ -1,15 +1,13 @@
 import sbt._
 import Keys._
 import com.typesafe.sbt.SbtStartScript
+import com.typesafe.sbt.SbtScalariform._
+import scalariform.formatter.preferences._
 
 object BwlBuild extends Build {
   val PROJECT_NAME = "bwl" 
 
-  var commonResolvers = Seq(
-    // local snapshot support
-    ScalaToolsSnapshots,
-
-    // common deps
+  val commonResolvers = Seq(
     "Wajam" at "http://ci1.cx.wajam/",
     "Maven.org" at "http://repo1.maven.org/maven2",
     "Sun Maven2 Repo" at "http://download.java.net/maven/2",
@@ -21,7 +19,7 @@ object BwlBuild extends Build {
     "Twitter" at "http://maven.twttr.com/"
   )
 
-  var commonDeps = Seq(
+  val commonDeps = Seq(
     "com.wajam" %% "nrv-core" % "0.1-SNAPSHOT",
     "com.wajam" %% "spnl-core" % "0.1-SNAPSHOT",
     "com.wajam" %% "scn-core" % "0.1-SNAPSHOT",
@@ -30,14 +28,20 @@ object BwlBuild extends Build {
     "org.mockito" % "mockito-core" % "1.9.0" % "test,it"
   )
 
-  val defaultSettings = Defaults.defaultSettings ++ Defaults.itSettings ++ Seq(
+  def configureScalariform(pref: IFormattingPreferences): IFormattingPreferences = {
+    pref.setPreference(AlignParameters, true)
+      .setPreference(DoubleIndentClassDeclaration, true)
+  }
+
+  val defaultSettings = Defaults.defaultSettings ++ Defaults.itSettings ++ scalariformSettings ++ Seq(
     libraryDependencies ++= commonDeps,
     resolvers ++= commonResolvers,
     retrieveManaged := true,
     publishMavenStyle := true,
     organization := "com.wajam",
     version := "0.1-SNAPSHOT",
-    scalaVersion := "2.10.2"
+    scalaVersion := "2.10.2",
+    ScalariformKeys.preferences := configureScalariform(FormattingPreferences())
   )
 
   lazy val root = Project(PROJECT_NAME, file("."))
