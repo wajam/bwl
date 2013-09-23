@@ -1,7 +1,25 @@
+# IDE generated files #
+######################
+.project
+.classpath
+.idea*
+.history
+*.iml
 *.class
 *.log
 
-# sbt specific
+#Edge Application #
+#################
+logs
+test/it.properties
+etc/local*
+
+# Scala-IDE specific
+.scala_dependencies
+
+# Build generated #
+###################
+build
 dist/*
 target/
 lib_managed/
@@ -9,5 +27,12 @@ src_managed/
 project/boot/
 project/plugins/project/
 
-# Scala-IDE specific
-.scala_dependencies
+# OS generated files #
+######################
+.DS_Store
+ehthumbs.db
+Icon?
+Thumbs.db
+.*.tmp
+.*.swp
+.swp
