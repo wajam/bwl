@@ -8,12 +8,6 @@
 *.class
 *.log
 
-#Edge Application #
-#################
-logs
-test/it.properties
-etc/local*
-
 # Scala-IDE specific
 .scala_dependencies
 
