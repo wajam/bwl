@@ -8,7 +8,6 @@ import com.wajam.spnl.feeder.Feeder
 import com.wajam.spnl.TaskContext
 import com.wajam.bwl.utils.PeekIterator
 import com.wajam.bwl.queue.Priority
-import scala.Some
 
 /**
  * Simple memory queue. MUST not be used in production.

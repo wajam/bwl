@@ -13,7 +13,7 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], factory:
 
   private implicit def msg2request(msg: InMessage) = new ApiRequest(msg)
 
-  private var timestampGenerator = new TimestampIdGenerator with SynchronizedIdGenerator[Long]
+  private val timestampGenerator = new TimestampIdGenerator with SynchronizedIdGenerator[Long]
 
   private var queues: Map[(Long, String), Queue] = Map()
 

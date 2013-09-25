@@ -2,16 +2,15 @@ package com.wajam.bwl
 
 import com.wajam.nrv.data._
 import com.wajam.nrv.InvalidParameter
-import scala.Some
 import com.wajam.nrv.data.MList
 
 // TODO: To merge with NRV Request
 class ApiRequest(msg: InMessage) {
   def paramString(param: String): String = {
-    paramOptionalString(param).getOrElse(throw new InvalidParameter(s"Parameter $param must be specified"))
+    paramString(param, throw new InvalidParameter(s"Parameter $param must be specified"))
   }
 
-  def paramString(param: String, default: String): String = paramOptionalString(param).getOrElse(default)
+  def paramString(param: String, default: => String): String = paramOptionalString(param).getOrElse(default)
 
   def paramOptionalString(param: String): Option[String] = paramOptionalSeqString(param) match {
     case Some(head :: _) => Some(head)
@@ -25,10 +24,10 @@ class ApiRequest(msg: InMessage) {
   }
 
   def paramBoolean(param: String): Boolean = {
-    paramOptionalBoolean(param).getOrElse(throw new InvalidParameter(s"Parameter $param must be specified"))
+    paramBoolean(param, throw new InvalidParameter(s"Parameter $param must be specified"))
   }
 
-  def paramBoolean(param: String, default: Boolean): Boolean = paramOptionalBoolean(param).getOrElse(default)
+  def paramBoolean(param: String, default: => Boolean): Boolean = paramOptionalBoolean(param).getOrElse(default)
 
   def paramOptionalBoolean(param: String): Option[Boolean] = paramOptionalString(param).map {
     case "1" => true
@@ -41,10 +40,10 @@ class ApiRequest(msg: InMessage) {
   }
 
   def paramLong(param: String): Long = {
-    paramOptionalLong(param).getOrElse(throw new InvalidParameter(s"Parameter $param must be specified"))
+    paramLong(param, throw new InvalidParameter(s"Parameter $param must be specified"))
   }
 
-  def paramLong(param: String, default: Long): Long = paramOptionalLong(param).getOrElse(default)
+  def paramLong(param: String, default: => Long): Long = paramOptionalLong(param).getOrElse(default)
 
   def paramOptionalLong(param: String): Option[Long] = {
     try {
@@ -55,10 +54,10 @@ class ApiRequest(msg: InMessage) {
   }
 
   def paramInt(param: String): Int = {
-    paramOptionalInt(param).getOrElse(throw new InvalidParameter(s"Parameter $param must be specified"))
+    paramInt(param, throw new InvalidParameter(s"Parameter $param must be specified"))
   }
 
-  def paramInt(param: String, default: Int): Int = paramOptionalInt(param).getOrElse(default)
+  def paramInt(param: String, default: => Int): Int = paramOptionalInt(param).getOrElse(default)
 
   def paramOptionalInt(param: String): Option[Int] = {
     val value = paramOptionalLong(param)
