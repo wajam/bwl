@@ -12,10 +12,6 @@ class PrioritySelector(priorities: Seq[Priority])
 
 case class QueueDefinition(name: String, priorities: Seq[Priority] = Seq(Priority(1, weight = 1)))
 
-trait QueueFactory {
-  def apply(token: Long, definition: QueueDefinition): Queue
-}
-
 trait Queue {
 
   def token: Long
@@ -33,4 +29,8 @@ trait Queue {
   def start()
 
   def stop()
+}
+
+object Queue {
+  type QueueFactory = (Long, QueueDefinition) => Queue
 }

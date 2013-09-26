@@ -14,8 +14,6 @@ import com.wajam.bwl.queue.Priority
  */
 class MemoryQueue(val token: Long, val name: String, val priorities: Seq[Priority]) extends Queue {
 
-  private val self = this
-
   private val selector = new PrioritySelector(priorities)
   private val queues = priorities.map(_.value -> new ConcurrentLinkedQueue[Message]).toMap
 
@@ -40,7 +38,7 @@ class MemoryQueue(val token: Long, val name: String, val priorities: Seq[Priorit
       }
     }
 
-    def name = self.name
+    def name = MemoryQueue.this.name
 
     def init(context: TaskContext) {}
 
@@ -58,12 +56,12 @@ class MemoryQueue(val token: Long, val name: String, val priorities: Seq[Priorit
   def stop() {}
 }
 
-object MemoryQueue extends QueueFactory {
+object MemoryQueue {
   def apply(token: Long, name: String, priorities: Seq[Priority]): Queue = {
     new MemoryQueue(token, name, priorities)
   }
 
-  def apply(token: Long, definition: QueueDefinition): Queue = {
+  def create(token: Long, definition: QueueDefinition): Queue = {
     new MemoryQueue(token, definition.name, definition.priorities)
   }
 }

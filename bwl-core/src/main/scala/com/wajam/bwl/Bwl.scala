@@ -1,13 +1,14 @@
 package com.wajam.bwl
 
-import com.wajam.nrv.service.{Resolver, ActionMethod, Action, Service}
-import com.wajam.nrv.data.{MInt, MValue, InMessage}
+import com.wajam.nrv.service.{ Resolver, ActionMethod, Action, Service }
+import com.wajam.nrv.data.{ MInt, MValue, InMessage }
 import com.wajam.nrv.data.MValue._
-import com.wajam.nrv.utils.{SynchronizedIdGenerator, TimestampIdGenerator}
-import com.wajam.bwl.queue.{QueueDefinition, Queue, QueueFactory}
+import com.wajam.nrv.utils.{ SynchronizedIdGenerator, TimestampIdGenerator }
+import com.wajam.bwl.queue.{ QueueDefinition, Queue }
 import com.wajam.spnl.feeder.Feeder
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ ExecutionContext, Future }
 import com.wajam.nrv.InvalidParameter
+import com.wajam.bwl.queue.Queue.QueueFactory
 
 class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], factory: QueueFactory) extends Service(name) {
 
@@ -31,9 +32,8 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], factory:
   /**
    * Enqueue the specified task data and returns the task id if enqueued successfully .
    */
-  def enqueue(token: Long, name: String, task: Any, priority: Option[Int] = None)
-             (implicit ec: ExecutionContext): Future[Long] = {
-    var params = List[(String, MValue)]("token" -> token, "name" -> name) ++ priority.map(p => "priority" -> MInt(p))
+  def enqueue(token: Long, name: String, task: Any, priority: Option[Int] = None)(implicit ec: ExecutionContext): Future[Long] = {
+    val params = List[(String, MValue)]("token" -> token, "name" -> name) ++ priority.map(p => "priority" -> MInt(p))
     val result = enqueueAction.call(params = params, meta = Map(), data = task)
     result.map(response => response.paramLong("id"))
   }
@@ -41,8 +41,7 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], factory:
   /**
    * Acknowledge the specified task by id
    */
-  private[bwl] def ack(token: Long, name: String, id: Long)
-                      (implicit ec: ExecutionContext): Future[Unit] = {
+  private[bwl] def ack(token: Long, name: String, id: Long)(implicit ec: ExecutionContext): Future[Unit] = {
     val result = ackAction.call(params = List("token" -> token, "name" -> name, "id" -> id), meta = Map(), data = null)
     result.map(_ => Unit)
   }
@@ -70,7 +69,7 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], factory:
             queue.enqueue(message, queue.priorities.head.value)
             message.reply(Map("id" -> message.timestamp.get.toString))
           }
-          case None => throw new InvalidParameter(s"Parameter priority must be specified")
+          case None => throw new InvalidParameter("Parameter priority must be specified")
         }
       }
       case None => throw new InvalidParameter(s"No queue $name for shard $token")

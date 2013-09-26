@@ -1,14 +1,14 @@
 package com.wajam.bwl
 
-import org.scalatest.{BeforeAndAfter, FunSuite}
+import org.scalatest.{ BeforeAndAfter, FunSuite }
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
-import com.wajam.nrv.cluster.{LocalNode, StaticClusterManager, Cluster}
+import com.wajam.nrv.cluster.{ LocalNode, StaticClusterManager, Cluster }
 import com.wajam.nrv.protocol.NrvProtocol
-import com.wajam.bwl.queue.{Priority, QueueDefinition}
+import com.wajam.bwl.queue.{ Priority, QueueDefinition }
 import com.wajam.bwl.queue.memory.MemoryQueue
 import FeederTestHelper._
-import scala.concurrent.{Future, Await, ExecutionContext}
+import scala.concurrent.{ Future, Await, ExecutionContext }
 import scala.concurrent.duration._
 import org.scalatest.matchers.ShouldMatchers._
 
@@ -28,7 +28,7 @@ class TestBwl extends FunSuite with BeforeAndAfter {
     val protocol = new NrvProtocol(cluster.localNode, 5000, 100)
     cluster.registerProtocol(protocol, default = true)
 
-    bwl = new Bwl(definitions = List(single, weighted), factory = MemoryQueue)
+    bwl = new Bwl(definitions = List(single, weighted), factory = MemoryQueue.create)
     bwl.applySupport(responseTimeout = Some(2000))
     cluster.registerService(bwl)
     bwl.addMember(0, cluster.localNode)
