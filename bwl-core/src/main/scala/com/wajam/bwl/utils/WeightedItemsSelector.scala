@@ -6,7 +6,7 @@ import scala.util.Random
  * Select next item T randomly based on each item weight.
  * Scala adaptation of http://stackoverflow.com/questions/6409652/random-weighted-selection-java-framework
  */
-class WeightedItemsSelector[T](weightedItems: Seq[(Double, T)]) {
+class WeightedItemsSelector[T](weightedItems: Iterable[(Double, T)]) {
 
   private val (distributedMap, total) = weightedItems.foldLeft((new java.util.TreeMap[Double, T], 0.0))((acc, entry) => {
     val (map, tot) = acc
