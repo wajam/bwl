@@ -2,28 +2,29 @@ package com.wajam.bwl.queue.memory
 
 import com.wajam.bwl.queue._
 import com.wajam.nrv.utils.timestamp.Timestamp
-import com.wajam.nrv.data.Message
+import com.wajam.nrv.data.{InMessage, Message}
 import java.util.concurrent.ConcurrentLinkedQueue
 import com.wajam.spnl.feeder.Feeder
 import com.wajam.spnl.TaskContext
 import com.wajam.bwl.utils.PeekIterator
 import com.wajam.bwl.queue.Priority
+import com.wajam.nrv.service.Service
 
 /**
  * Simple memory queue. MUST not be used in production.
  */
-class MemoryQueue(val token: Long, val name: String, val priorities: Seq[Priority]) extends Queue {
+class MemoryQueue(val token: Long, val name: String, val priorities: Iterable[Priority]) extends Queue {
 
   private val selector = new PrioritySelector(priorities)
   private val queues = priorities.map(_.value -> new ConcurrentLinkedQueue[Message]).toMap
 
   private val randomTaskIterator = PeekIterator(Iterator.continually(queues(selector.next).poll()))
 
-  def enqueue(task: Message, priority: Int) {
-    queues(priority).offer(task)
+  def enqueue(taskMsg: InMessage, priority: Int) {
+    queues(priority).offer(taskMsg)
   }
 
-  def ack(id: Timestamp) {
+  def ack(id: Timestamp, ackMsg: InMessage) {
     // No-op
   }
 
@@ -61,7 +62,7 @@ object MemoryQueue {
     new MemoryQueue(token, name, priorities)
   }
 
-  def create(token: Long, definition: QueueDefinition): Queue = {
+  def create(token: Long, definition: QueueDefinition, service: Service with QueueService): Queue = {
     new MemoryQueue(token, definition.name, definition.priorities)
   }
 }
