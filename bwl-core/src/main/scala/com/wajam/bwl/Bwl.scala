@@ -7,7 +7,6 @@ import com.wajam.bwl.queue._
 import scala.concurrent.{ExecutionContext, Future}
 import com.wajam.bwl.queue.Queue.QueueFactory
 import com.wajam.spnl._
-import scala.Some
 import com.wajam.bwl.queue.QueueDefinition
 import com.wajam.nrv.data.MInt
 import com.wajam.nrv.Logging
@@ -16,8 +15,7 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
           spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)
   extends Service(name) with QueueService with Logging {
 
-  // TODO: find a better name
-  private case class BwlQueue(queue: Queue, task: Task) {
+  private case class QueueWrapper(queue: Queue, task: Task) {
     def start() {
       registerAction(task.action.action)
       queue.start()
@@ -31,7 +29,7 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
     }
   }
 
-  private var queues: Map[(Long, String), BwlQueue] = Map()
+  private var queues: Map[(Long, String), QueueWrapper] = Map()
 
   applySupport(resolver = Some(new Resolver(tokenExtractor = Resolver.TOKEN_PARAM("token"))))
 
@@ -67,7 +65,7 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
     result.map(_ => Unit)
   }
 
-  private def createBwlQueue(member: ServiceMember, definition: QueueDefinition): BwlQueue = {
+  private def createQueueWrapper(member: ServiceMember, definition: QueueDefinition): QueueWrapper = {
     val queue = createQueue(member.token, definition, this)
     val persistence = taskPersistenceFactory.createServiceMemberPersistence(this, member)
 
@@ -75,11 +73,12 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
     val taskAction = new TaskAction(definition.name, queueCallbackAdapter(definition), responseTimeout)
     val task = new Task(queue.feeder, taskAction, persistence, queue.definition.taskContext)
 
-    BwlQueue(queue, task)
+    QueueWrapper(queue, task)
   }
 
   private def queueCallbackAdapter(definition: QueueDefinition)(request: SpnlRequest) {
     import QueueTask.Result
+    import QueueResource._
 
     implicit val sameThreadExecutionContext = new ExecutionContext {
       def execute(runnable: Runnable) {
@@ -91,10 +90,20 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
       }
     }
 
-    val response = definition.callback(request.message.getData[QueueTask.Data])
+    val data = request.message.getData[QueueTask.Data]
+    val taskToken = data(TaskToken).toString.toLong
+    val taskId = data(TaskId).toString.toLong
+
+    val response = definition.callback(data)
     response.onSuccess {
-      case Result.Ok => request.ok()
-      case Result.Fail(error, ignore) if ignore => request.ignore(error)
+      case Result.Ok => {
+        request.ok()
+        ack(taskToken, definition.name, taskId)
+      }
+      case Result.Fail(error, ignore) if ignore => {
+        request.ignore(error)
+        ack(taskToken, definition.name, taskId)
+      }
       case Result.Fail(error, ignore) => request.fail(error)
     }
     response.onFailure {
@@ -109,7 +118,7 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
     // Build queues for each queue definition and local service member pair
     // TODO: Creates/deletes queues when service members goes Up/Down
     val localMembers = members.filter(m => cluster.isLocalNode(m.node)).toList
-    queues = definitions.flatMap(d => localMembers.map(m => (m.token, d.name) -> createBwlQueue(m, d))).toMap
+    queues = definitions.flatMap(d => localMembers.map(m => (m.token, d.name) -> createQueueWrapper(m, d))).toMap
     queues.valuesIterator.foreach(_.start())
   }
 
