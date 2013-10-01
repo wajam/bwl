@@ -7,13 +7,12 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import com.wajam.spnl.feeder.Feeder
 import com.wajam.spnl.TaskContext
 import com.wajam.bwl.utils.PeekIterator
-import com.wajam.bwl.queue.Priority
 import com.wajam.nrv.service.Service
 
 /**
  * Simple memory queue. MUST not be used in production.
  */
-class MemoryQueue(val token: Long, val name: String, val priorities: Iterable[Priority]) extends Queue {
+class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queue {
 
   private val selector = new PrioritySelector(priorities)
   private val queues = priorities.map(_.value -> new ConcurrentLinkedQueue[Message]).toMap
@@ -30,20 +29,26 @@ class MemoryQueue(val token: Long, val name: String, val priorities: Iterable[Pr
 
   lazy val feeder = new Feeder {
     implicit def msg2data(message: Message): Option[Map[String, Any]] = {
-      message match {
-        case null => None
-        case msg => Some(Map(
-          "token" -> message.token,
-          "id" -> message.timestamp.get.value,
-          "data" -> message.getData))
-      }
+      Some(Map(
+        "token" -> message.token.toString,
+        "id" -> message.timestamp.get.value,
+        "data" -> message.getData))
     }
 
     def name = MemoryQueue.this.name
 
     def init(context: TaskContext) {}
 
-    def peek() = randomTaskIterator.peek
+    def peek() = {
+      randomTaskIterator.peek match {
+        case null => {
+          // Peek returned nothing, must skip it or will always be null
+          randomTaskIterator.next()
+          None
+        }
+        case data => data
+      }
+    }
 
     def next() = randomTaskIterator.next()
 
@@ -58,11 +63,7 @@ class MemoryQueue(val token: Long, val name: String, val priorities: Iterable[Pr
 }
 
 object MemoryQueue {
-  def apply(token: Long, name: String, priorities: Seq[Priority]): Queue = {
-    new MemoryQueue(token, name, priorities)
-  }
-
   def create(token: Long, definition: QueueDefinition, service: Service with QueueService): Queue = {
-    new MemoryQueue(token, definition.name, definition.priorities)
+    new MemoryQueue(token, definition)
   }
 }
