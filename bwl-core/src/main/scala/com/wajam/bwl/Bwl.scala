@@ -4,17 +4,17 @@ import com.wajam.nrv.service.{ServiceMember, Resolver, Service}
 import com.wajam.nrv.data.MValue
 import com.wajam.nrv.data.MValue._
 import com.wajam.bwl.queue._
-import com.wajam.spnl.feeder.Feeder
 import scala.concurrent.{ExecutionContext, Future}
 import com.wajam.bwl.queue.Queue.QueueFactory
 import com.wajam.spnl._
 import scala.Some
 import com.wajam.bwl.queue.QueueDefinition
 import com.wajam.nrv.data.MInt
+import com.wajam.nrv.Logging
 
 class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQueue: QueueFactory,
           spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)
-  extends Service(name) with QueueService {
+  extends Service(name) with QueueService with Logging {
 
   // TODO: find a better name
   private case class BwlQueue(queue: Queue, task: Task) {
@@ -72,13 +72,13 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
     val persistence = taskPersistenceFactory.createServiceMemberPersistence(this, member)
 
     // TODO: allow per queue timeout???
-    val taskAction = new TaskAction(definition.name, queueCallbackAction(definition), responseTimeout)
+    val taskAction = new TaskAction(definition.name, queueCallbackAdapter(definition), responseTimeout)
     val task = new Task(queue.feeder, taskAction, persistence, queue.definition.taskContext)
 
     BwlQueue(queue, task)
   }
 
-  private def queueCallbackAction(definition: QueueDefinition)(request: SpnlRequest) {
+  private def queueCallbackAdapter(definition: QueueDefinition)(request: SpnlRequest) {
     import QueueTask.Result
 
     implicit val sameThreadExecutionContext = new ExecutionContext {
@@ -87,11 +87,7 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
       }
 
       def reportFailure(t: Throwable) {
-        // TODO: log this instead!
-        t match {
-          case e: Exception => request.fail(e)
-          case _ => request.fail(new Exception(t))
-        }
+        log.error("Failure in BWL queue future callback: " + t)
       }
     }
 
