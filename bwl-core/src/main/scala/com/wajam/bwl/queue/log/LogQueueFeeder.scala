@@ -4,16 +4,16 @@ import com.wajam.spnl.feeder.Feeder
 import com.wajam.spnl.TaskContext
 import com.wajam.bwl.queue.{ QueueTask, QueueDefinition, PrioritySelector }
 import com.wajam.bwl.utils.PeekIterator
-import com.wajam.bwl.queue.log.LogQueueFeeder.PriorityReader
+import com.wajam.bwl.queue.log.LogQueueFeeder.QueueReader
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.bwl.QueueResource._
 import com.wajam.commons.Closable
 
-class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Option[Timestamp]) => PriorityReader)
+class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Option[Timestamp]) => QueueReader)
     extends Feeder {
 
   private val selector = new PrioritySelector(definition.priorities)
-  private var readers: Map[Int, PriorityReader] = Map()
+  private var readers: Map[Int, QueueReader] = Map()
   private var randomTaskIterator: PeekIterator[Option[QueueEntry.Enqueue]] = PeekIterator(Iterator())
 
   // Collection of non-acknowledged entries
@@ -28,17 +28,21 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
   def init(context: TaskContext) {
     // TODO: extract start timestamp for each priority from TaskContext and use it to create readers
     readers = definition.priorities.map(priority => priority.value -> createPriorityReader(priority.value, None)).toMap
-    randomTaskIterator = PeekIterator(readers(selector.next))
+    randomTaskIterator = PeekIterator(Iterator.continually(readers(selector.next).next()))
   }
 
   def peek() = {
-    randomTaskIterator.peek match {
-      case None => {
-        // Peek returned nothing, must skip it or will always be null
-        randomTaskIterator.next()
-        None
+    if (randomTaskIterator.nonEmpty) {
+      randomTaskIterator.peek match {
+        case None => {
+          // Peek returned nothing, must skip it or will always be null
+          randomTaskIterator.next()
+          None
+        }
+        case data => data
       }
-      case data => data
+    } else {
+      None
     }
   }
 
@@ -65,5 +69,5 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
 }
 
 object LogQueueFeeder {
-  type PriorityReader = PeekIterator[Option[QueueEntry.Enqueue]] with Closable
+  type QueueReader = Iterator[Option[QueueEntry.Enqueue]] with Closable
 }

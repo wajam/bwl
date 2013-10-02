@@ -1,29 +1,30 @@
 package com.wajam.bwl.queue.log
 
-import com.wajam.bwl.queue.{ QueueService, QueueDefinition, Queue }
+import com.wajam.bwl.queue.{ Priority, QueueService, QueueDefinition, Queue }
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.nrv.data.{ MessageType, OutMessage, InMessage }
 import java.io.File
 import java.nio.file.{ Files, Paths }
 import com.wajam.nrv.consistency.{ ConsistencyMasterSlave, ResolvedServiceMember, TransactionRecorder }
-import com.wajam.bwl.queue.log.LogQueue.{ QueueReader, RecorderFactory }
+import com.wajam.bwl.queue.log.LogQueue.RecorderFactory
 import com.wajam.nrv.service.Service
-import com.wajam.nrv.consistency.log.FileTransactionLog
-import com.wajam.bwl.queue.log.LogQueueFeeder.PriorityReader
+import com.wajam.nrv.consistency.log.{ TimestampedRecord, FileTransactionLog }
+import com.wajam.bwl.queue.log.LogQueueFeeder.QueueReader
 import com.wajam.nrv.consistency.replication.TransactionLogReplicationIterator
-import com.wajam.bwl.utils.ClosablePeekIterator
 import scala.collection.mutable
 import com.wajam.commons.Closable
+import com.wajam.bwl.QueueResource.TaskPriority
 
 class LogQueue(val token: Long, service: Service with QueueService, val definition: QueueDefinition,
                recorderFactory: RecorderFactory) extends Queue {
 
-  val recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition)).toMap
+  val recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
   val reloadedAck: mutable.Set[Timestamp] = mutable.Set()
 
   def enqueue(taskMsg: InMessage, priority: Int) {
     recorders.get(priority) match {
       case Some(recorder) => {
+        taskMsg.parameters.put(TaskPriority, priority)
         recorder.appendMessage(taskMsg)
         recorder.appendMessage(createSyntheticSuccessResponse(taskMsg))
       }
@@ -48,21 +49,33 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
     response
   }
 
-  val feeder = new LogQueueFeeder(definition, createPriorityQueueFeeder)
+  val feeder = new LogQueueFeeder(definition, createPriorityQueueReader)
 
-  private def createPriorityQueueFeeder(priority: Int, startTimestamp: Option[Timestamp]): PriorityReader = {
+  private def createPriorityQueueReader(priority: Int, startTimestamp: Option[Timestamp]): QueueReader = {
     val recorder = recorders(priority)
 
     def createLogQueueReader: QueueReader = {
-      // TODO: support missing start timestamp
       // TODO: rebuild in-memory priority states including 'reloadedAck'
       val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
-      val itr = new TransactionLogReplicationIterator(recorder.member, startTimestamp.get, txLog,
-        recorder.currentConsistentTimestamp)
+      val itr = new TransactionLogReplicationIterator(recorder.member,
+        startTimestamp.getOrElse(findStartTimestamp(txLog)), txLog, recorder.currentConsistentTimestamp)
       new LogQueueReader(service, itr, reloadedAck)
     }
 
-    new ClosablePeekIterator(new DelayedQueueReader(recorder, createLogQueueReader))
+    new DelayedQueueReader(recorder, createLogQueueReader)
+  }
+
+  def findStartTimestamp(txLog: FileTransactionLog): Timestamp = {
+    val itr = txLog.read
+    try {
+      val first = txLog.firstRecord(timestamp = None)
+      val startRange = itr.takeWhile(_.consistentTimestamp < first.map(_.timestamp)).collect {
+        case r: TimestampedRecord => r
+      }.toVector.sortBy(_.timestamp)
+      startRange.head.timestamp
+    } finally {
+      itr.close()
+    }
   }
 
   def start() {
@@ -103,16 +116,17 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
 
   object EmptyUnclosableReader extends Iterator[Option[QueueEntry.Enqueue]] with Closable {
     def hasNext = true
+
     def next() = None
+
     def close() {}
   }
+
 }
 
 object LogQueue {
 
-  type QueueReader = Iterator[Option[QueueEntry.Enqueue]] with Closable
-
-  type RecorderFactory = (Long, QueueDefinition) => TransactionRecorder
+  type RecorderFactory = (Long, QueueDefinition, Priority) => TransactionRecorder
 
   /**
    * LogQueue factory method usable as [[com.wajam.bwl.queue.Queue.QueueFactory]] with Bwl service
@@ -128,9 +142,10 @@ object LogQueue {
       timestampTimeout + 250
     }
 
-    def createRecorder(token: Long, definition: QueueDefinition): TransactionRecorder = {
+    def createRecorder(token: Long, definition: QueueDefinition, priority: Priority): TransactionRecorder = {
       Files.createDirectories(logDir)
-      val txLog = new FileTransactionLog(definition.name, token, logDir.toString, logFileRolloverSize)
+      val name = s"${definition.name}#${priority.value}"
+      val txLog = new FileTransactionLog(name, token, logDir.toString, logFileRolloverSize)
       new TransactionRecorder(ResolvedServiceMember(service, token), txLog, consistencyDelay,
         service.responseTimeout, logCommitFrequency, {})
     }

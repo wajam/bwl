@@ -1,7 +1,5 @@
 package com.wajam.bwl.utils
 
-import com.wajam.commons.Closable
-
 /**
  * Iterator decorator which allows peeking at the next element. This implementation read ahead the next element.
  */
@@ -30,8 +28,4 @@ class PeekIterator[T](itr: Iterator[T]) extends Iterator[T] {
 
 object PeekIterator {
   def apply[T](itr: Iterator[T]): PeekIterator[T] = new PeekIterator(itr)
-}
-
-class ClosablePeekIterator[T](itr: Iterator[T] with Closable) extends PeekIterator[T](itr) with Closable {
-  def close() = itr.close()
 }

@@ -21,9 +21,9 @@ object QueueEntry {
     message.function match {
       case MessageType.FUNCTION_CALL => {
         if (service.queueResource.create(service).forall(_.matches(message.path, ActionMethod.POST))) {
-          message.timestamp.map(QueueEntry.Enqueue(_, message.token, message.param[Int](Priority), message.getData[Any]))
+          message.timestamp.map(QueueEntry.Enqueue(_, message.token, message.param[Int](TaskPriority), message.getData[Any]))
         } else if (service.queueResource.delete(service).forall(_.matches(message.path, ActionMethod.DELETE))) {
-          message.timestamp.map(QueueEntry.Ack(_, message.param[Int](Priority)))
+          message.timestamp.map(QueueEntry.Ack(_, message.param[Int](TaskPriority)))
         } else {
           None
         }

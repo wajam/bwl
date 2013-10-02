@@ -47,7 +47,7 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
 
     val action = queueResource.create(this).get
 
-    val params = List[(String, MValue)](TaskToken -> token, QueueName -> name) ++ priority.map(p => Priority -> MInt(p))
+    val params = List[(String, MValue)](TaskToken -> token, QueueName -> name) ++ priority.map(p => TaskPriority -> MInt(p))
     val result = action.call(params = params, meta = Map(), data = task)
     result.map(response => response.param[Long](TaskId))
   }
