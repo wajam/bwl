@@ -1,10 +1,10 @@
 package com.wajam.bwl
 
-import com.wajam.nrv.service.{ServiceMember, Resolver, Service}
+import com.wajam.nrv.service.{ ServiceMember, Resolver, Service }
 import com.wajam.nrv.data.MValue
 import com.wajam.nrv.data.MValue._
 import com.wajam.bwl.queue._
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ ExecutionContext, Future }
 import com.wajam.bwl.queue.Queue.QueueFactory
 import com.wajam.spnl._
 import com.wajam.bwl.queue.QueueDefinition
@@ -13,7 +13,7 @@ import com.wajam.nrv.Logging
 
 class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQueue: QueueFactory,
           spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)
-  extends Service(name) with QueueService with Logging {
+    extends Service(name) with QueueService with Logging {
 
   private case class QueueWrapper(queue: Queue, task: Task) {
     def start() {

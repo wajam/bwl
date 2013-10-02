@@ -5,13 +5,14 @@ import com.wajam.nrv.extension.resource.ParamsAccessor._
 import com.wajam.bwl.queue.Queue
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.nrv.InvalidParameter
-import com.wajam.nrv.utils.{SynchronizedIdGenerator, TimestampIdGenerator}
+import com.wajam.nrv.utils.TimestampIdGenerator
 import com.wajam.nrv.data.InMessage
 import QueueResource._
 import com.wajam.nrv.service.ServiceMember
+import com.wajam.commons.SynchronizedIdGenerator
 
 class QueueResource(getQueue: => (Long, String) => Option[Queue], getMember: Long => ServiceMember)
-  extends Resource("queues/:token/:name/tasks", "id") with Create with Delete {
+    extends Resource("queues/:token/:name/tasks", "id") with Create with Delete {
 
   private val timestampGenerator = new TimestampIdGenerator with SynchronizedIdGenerator[Long]
 

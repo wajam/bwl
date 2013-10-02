@@ -5,7 +5,7 @@ import com.wajam.nrv.data.InMessage
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.bwl.utils.WeightedItemsSelector
 import com.wajam.nrv.service.Service
-import com.wajam.nrv.extension.resource.{Delete, Create, Resource}
+import com.wajam.nrv.extension.resource.{ Delete, Create, Resource }
 import com.wajam.spnl.TaskContext
 import scala.concurrent.Future
 
