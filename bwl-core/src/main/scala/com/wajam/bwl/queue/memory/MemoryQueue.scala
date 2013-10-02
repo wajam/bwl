@@ -2,7 +2,7 @@ package com.wajam.bwl.queue.memory
 
 import com.wajam.bwl.queue._
 import com.wajam.nrv.utils.timestamp.Timestamp
-import com.wajam.nrv.data.{InMessage, Message}
+import com.wajam.nrv.data.{ InMessage, Message }
 import java.util.concurrent.ConcurrentLinkedQueue
 import com.wajam.spnl.feeder.Feeder
 import com.wajam.spnl.TaskContext
