@@ -6,8 +6,8 @@ import com.wajam.bwl.queue.{ QueueTask, QueueDefinition, PrioritySelector }
 import com.wajam.bwl.utils.PeekIterator
 import com.wajam.bwl.queue.log.LogQueueFeeder.PriorityReader
 import com.wajam.nrv.utils.timestamp.Timestamp
-import com.wajam.nrv.utils.Closable
 import com.wajam.bwl.QueueResource._
+import com.wajam.commons.Closable
 
 class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Option[Timestamp]) => PriorityReader)
     extends Feeder {

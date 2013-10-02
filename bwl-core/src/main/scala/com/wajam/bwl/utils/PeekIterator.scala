@@ -1,6 +1,6 @@
 package com.wajam.bwl.utils
 
-import com.wajam.nrv.utils.Closable
+import com.wajam.commons.Closable
 
 /**
  * Iterator decorator which allows peeking at the next element. This implementation read ahead the next element.

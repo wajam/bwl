@@ -4,7 +4,7 @@ import com.wajam.bwl.queue.{ QueueService, QueueDefinition, Queue }
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.nrv.data.{ MessageType, OutMessage, InMessage }
 import java.io.File
-import java.nio.file.{Files, Paths}
+import java.nio.file.{ Files, Paths }
 import com.wajam.nrv.consistency.{ ConsistencyMasterSlave, ResolvedServiceMember, TransactionRecorder }
 import com.wajam.bwl.queue.log.LogQueue.{ QueueReader, RecorderFactory }
 import com.wajam.nrv.service.Service
@@ -13,7 +13,7 @@ import com.wajam.bwl.queue.log.LogQueueFeeder.PriorityReader
 import com.wajam.nrv.consistency.replication.TransactionLogReplicationIterator
 import com.wajam.bwl.utils.ClosablePeekIterator
 import scala.collection.mutable
-import com.wajam.nrv.utils.Closable
+import com.wajam.commons.Closable
 
 class LogQueue(val token: Long, service: Service with QueueService, val definition: QueueDefinition,
                recorderFactory: RecorderFactory) extends Queue {
@@ -42,10 +42,9 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
   }
 
   private def createSyntheticSuccessResponse(request: InMessage): OutMessage = {
-    val response = new OutMessage()
+    val response = new OutMessage(code = 200)
     request.copyTo(response)
     response.function = MessageType.FUNCTION_RESPONSE
-    response.code = 200
     response
   }
 
@@ -79,7 +78,7 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
    * Achieved by waiting until the recorder produce a valid consistent timestamp.
    */
   class DelayedQueueReader(recorder: TransactionRecorder, createReader: => QueueReader)
-    extends Iterator[Option[QueueEntry.Enqueue]] with Closable {
+      extends Iterator[Option[QueueEntry.Enqueue]] with Closable {
 
     private var reader: Option[QueueReader] = None
 

@@ -2,10 +2,10 @@ package com.wajam.bwl.queue.log
 
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.nrv.data.Message
-import com.wajam.nrv.utils.Closable
 import scala.collection.mutable
 import com.wajam.bwl.queue.QueueService
 import com.wajam.nrv.service.Service
+import com.wajam.commons.Closable
 
 class LogQueueReader(service: QueueService with Service, itr: Iterator[Option[Message]] with Closable,
                      processed: mutable.Set[Timestamp]) extends Iterator[Option[QueueEntry.Enqueue]] with Closable {
