@@ -21,7 +21,7 @@ class PrioritySelector(priorities: Iterable[Priority])
   extends WeightedItemsSelector(priorities.map(p => (p.weight.toDouble, p.value)))
 
 case class QueueDefinition(name: String, callback: QueueTask.Callback, taskContext: TaskContext = new TaskContext,
-                           priorities: Seq[Priority] = Seq(Priority(1, weight = 1)))
+                           priorities: Iterable[Priority] = Seq(Priority(1, weight = 1)))
 
 trait Queue {
 

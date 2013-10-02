@@ -10,7 +10,7 @@ import com.wajam.nrv.data.InMessage
 import QueueResource._
 import com.wajam.nrv.service.ServiceMember
 
-class QueueResource(getQueue: => (Long, String) => Option[Queue], getMember: Long => ServiceMember)
+private[bwl] class QueueResource(getQueue: => (Long, String) => Option[Queue], getMember: Long => ServiceMember)
   extends Resource("queues/:token/:name/tasks", "id") with Create with Delete {
 
   private val timestampGenerator = new TimestampIdGenerator with SynchronizedIdGenerator[Long]

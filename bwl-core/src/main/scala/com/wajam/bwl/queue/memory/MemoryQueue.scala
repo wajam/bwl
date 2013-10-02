@@ -2,7 +2,7 @@ package com.wajam.bwl.queue.memory
 
 import com.wajam.bwl.queue._
 import com.wajam.nrv.utils.timestamp.Timestamp
-import com.wajam.nrv.data.{InMessage, Message}
+import com.wajam.nrv.data.{ InMessage, Message }
 import java.util.concurrent.ConcurrentLinkedQueue
 import com.wajam.spnl.feeder.Feeder
 import com.wajam.spnl.TaskContext
@@ -24,7 +24,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queu
   }
 
   def ack(id: Timestamp, ackMsg: InMessage) {
-    // No-op
+    // No-op. Memory queues are not persisted.
   }
 
   lazy val feeder = new Feeder {
@@ -37,7 +37,9 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queu
 
     def name = MemoryQueue.this.name
 
-    def init(context: TaskContext) {}
+    def init(context: TaskContext) {
+      // No-op. Memory queues are not persisted.
+    }
 
     def peek() = {
       randomTaskIterator.peek match {
@@ -52,7 +54,9 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queu
 
     def next() = randomTaskIterator.next()
 
-    def ack(data: Map[String, Any]) {}
+    def ack(data: Map[String, Any]) {
+      // No-op. Memory queues are not persisted.
+    }
 
     def kill() {}
   }
