@@ -5,7 +5,7 @@ import com.typesafe.sbt.SbtScalariform._
 import scalariform.formatter.preferences._
 
 object BwlBuild extends Build {
-  val PROJECT_NAME = "bwl" 
+  val PROJECT_NAME = "bwl"
 
   val commonResolvers = Seq(
     "Wajam" at "http://ci1.cx.wajam/",
@@ -20,7 +20,9 @@ object BwlBuild extends Build {
   )
 
   val commonDeps = Seq(
+    "com.wajam" %% "commons-core" % "0.1-SNAPSHOT",
     "com.wajam" %% "nrv-core" % "0.1-SNAPSHOT",
+    "com.wajam" %% "nrv-extension" % "0.1-SNAPSHOT",
     "com.wajam" %% "spnl-core" % "0.1-SNAPSHOT",
     "com.wajam" %% "scn-core" % "0.1-SNAPSHOT",
     "org.scalatest" %% "scalatest" % "1.9.1" % "test,it",

@@ -1,22 +1,21 @@
 package com.wajam.bwl
 
-import org.scalatest.{BeforeAndAfter, FunSuite}
+import org.scalatest.{ BeforeAndAfter, FunSuite }
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
-import com.wajam.nrv.cluster.{LocalNode, StaticClusterManager, Cluster}
+import com.wajam.nrv.cluster.{ LocalNode, StaticClusterManager, Cluster }
 import com.wajam.nrv.protocol.NrvProtocol
-import com.wajam.bwl.queue.{QueueTask, Priority, QueueDefinition}
+import com.wajam.bwl.queue.{ QueueTask, Priority, QueueDefinition }
 import com.wajam.bwl.queue.memory.MemoryQueue
-import scala.concurrent.{Future, Await, ExecutionContext}
+import scala.concurrent.{ Future, Await, ExecutionContext }
 import scala.concurrent.duration._
 import org.scalatest.matchers.ShouldMatchers._
-import com.wajam.spnl.{TaskContext, Spnl}
-import org.mockito.Matchers.{eq => argEquals}
+import com.wajam.spnl.{ TaskContext, Spnl }
+import org.mockito.Matchers.{ eq => argEquals }
 import org.mockito.Mockito._
 import org.scalatest.mock.MockitoSugar
 import org.mockito.ArgumentCaptor
 import scala.collection.JavaConversions._
-
 
 @RunWith(classOf[JUnitRunner])
 class TestBwl extends FunSuite with BeforeAndAfter with MockitoSugar {
