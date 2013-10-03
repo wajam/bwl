@@ -10,10 +10,10 @@ import com.wajam.commons.Closable
 class LogQueueReader(service: QueueService with Service, itr: Iterator[Option[Message]] with Closable,
                      processed: mutable.Set[Timestamp]) extends Iterator[Option[QueueEntry.Enqueue]] with Closable {
 
-  import QueueEntry.message2LogTask
+  import QueueEntry.message2entry
 
   val enqueueEntries: Iterator[Option[QueueEntry.Enqueue]] = itr.map {
-    case Some(msg) => message2LogTask(msg, service)
+    case Some(msg) => message2entry(msg, service)
     case None => None
   }.collect {
     case Some(data: QueueEntry.Enqueue) => {

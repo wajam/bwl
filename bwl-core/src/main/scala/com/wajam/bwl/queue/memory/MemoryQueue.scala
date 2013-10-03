@@ -2,7 +2,6 @@ package com.wajam.bwl.queue.memory
 
 import com.wajam.bwl.queue._
 import com.wajam.nrv.utils.timestamp.Timestamp
-import com.wajam.nrv.data.{ InMessage, Message }
 import java.util.concurrent.ConcurrentLinkedQueue
 import com.wajam.spnl.feeder.Feeder
 import com.wajam.spnl.TaskContext
@@ -14,26 +13,23 @@ import com.wajam.nrv.service.Service
  */
 class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queue {
 
+  type TaskData = Map[String, Any]
+
   private val selector = new PrioritySelector(priorities)
-  private val queues = priorities.map(_.value -> new ConcurrentLinkedQueue[Message]).toMap
+  private val queues = priorities.map(_.value -> new ConcurrentLinkedQueue[TaskData]).toMap
 
   private val randomTaskIterator = PeekIterator(Iterator.continually(queues(selector.next).poll()))
 
-  def enqueue(taskMsg: InMessage, priority: Int) {
-    queues(priority).offer(taskMsg)
+  def enqueue(taskId: Timestamp, taskToken: Long, taskPriority: Int, taskData: Any) {
+    val data = Map("token" -> taskToken.toString, "id" -> taskId.value, "data" -> taskData)
+    queues(taskPriority).offer(data)
   }
 
-  def ack(id: Timestamp, ackMsg: InMessage) {
+  def ack(taskId: Timestamp) {
     // No-op. Memory queues are not persisted.
   }
 
   lazy val feeder = new Feeder {
-    implicit def msg2data(message: Message): Option[Map[String, Any]] = {
-      Some(Map(
-        "token" -> message.token.toString,
-        "id" -> message.timestamp.get.value,
-        "data" -> message.getData))
-    }
 
     def name = MemoryQueue.this.name
 
@@ -48,11 +44,11 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queu
           randomTaskIterator.next()
           None
         }
-        case data => data
+        case data => Some(data)
       }
     }
 
-    def next() = randomTaskIterator.next()
+    def next() = Option(randomTaskIterator.next())
 
     def ack(data: Map[String, Any]) {
       // No-op. Memory queues are not persisted.
