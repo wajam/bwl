@@ -26,17 +26,16 @@ private[bwl] class QueueResource(getQueue: => (Long, String) => Option[Queue], g
     getQueue(memberToken, queueName) match {
       case Some(queue: Queue) => {
 
-        // Ensure message has a timestamp
-        val timestamp = getOrCreateMessageTimestamp(message)
+        val taskId: Timestamp = message.timestamp.getOrElse(timestampGenerator.nextId)
         params.optionalParam[Int](TaskPriority) match {
           case Some(priority) => {
-            queue.enqueue(message, priority)
-            message.reply(Map(TaskId -> timestamp.toString))
+            queue.enqueue(taskId, taskToken, priority, message.getData[Any])
+            message.reply(Map(TaskId -> taskId.toString))
           }
           case None if queue.priorities.size == 1 => {
             // If no priority is specified and queue has only one priority, default to that priority
-            queue.enqueue(message, queue.priorities.head.value)
-            message.reply(Map(TaskId -> timestamp.toString))
+            queue.enqueue(taskId, taskToken, queue.priorities.head.value, message.getData[Any])
+            message.reply(Map(TaskId -> taskId.toString))
           }
           case None => throw new InvalidParameter("Parameter priority must be specified")
         }
@@ -51,27 +50,11 @@ private[bwl] class QueueResource(getQueue: => (Long, String) => Option[Queue], g
     val taskToken = params.param[Long](TaskToken)
     val memberToken = getMember(taskToken).token
     val queueName = params.param[String](QueueName)
-    val id = params.param[Long](TaskId)
+    val taskId = params.param[Long](TaskId)
 
-    getOrCreateMessageTimestamp(message)
     getQueue(memberToken, queueName) match {
-      case Some(queue: Queue) => queue.ack(id, message)
+      case Some(queue: Queue) => queue.ack(taskId)
       case None => throw new InvalidParameter(s"No queue '$queueName' for shard $memberToken")
-    }
-  }
-
-  /**
-   * Returns the specified message timestamp or returns a newly created timestamp if the message lack a timestamp.
-   * The message is also updated with the new timestamp.
-   */
-  private def getOrCreateMessageTimestamp(message: InMessage): Timestamp = {
-    message.timestamp match {
-      case Some(timestamp) => timestamp
-      case None => {
-        val timestamp: Timestamp = timestampGenerator.nextId
-        message.timestamp = Some(timestamp)
-        timestamp
-      }
     }
   }
 }

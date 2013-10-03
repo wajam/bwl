@@ -1,8 +1,9 @@
 package com.wajam.bwl.queue.log
 
-import com.wajam.bwl.queue.{ Priority, QueueService, QueueDefinition, Queue }
+import com.wajam.bwl.queue.{ QueueService, Queue }
 import com.wajam.nrv.utils.timestamp.Timestamp
-import com.wajam.nrv.data.{ MessageType, OutMessage, InMessage }
+import com.wajam.nrv.data._
+import com.wajam.nrv.data.MValue._
 import java.io.File
 import java.nio.file.{ Files, Paths }
 import com.wajam.nrv.consistency.{ ConsistencyMasterSlave, ResolvedServiceMember, TransactionRecorder }
@@ -13,7 +14,9 @@ import com.wajam.bwl.queue.log.LogQueueFeeder.QueueReader
 import com.wajam.nrv.consistency.replication.TransactionLogReplicationIterator
 import scala.collection.mutable
 import com.wajam.commons.Closable
-import com.wajam.bwl.QueueResource.TaskPriority
+import com.wajam.bwl.QueueResource._
+import com.wajam.bwl.queue.Priority
+import com.wajam.bwl.queue.QueueDefinition
 
 /**
  * Persistent queue using NRV transaction log as backing storage. Each priority is appended to separate log.
@@ -24,28 +27,41 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
   val recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
   val reloadedAck: mutable.Set[Timestamp] = mutable.Set()
 
-  def enqueue(taskMsg: InMessage, priority: Int) {
-    recorders.get(priority) match {
+  def enqueue(taskId: Timestamp, taskToken: Long, taskPriority: Int, taskData: Any) {
+    recorders.get(taskPriority) match {
       case Some(recorder) => {
-        taskMsg.parameters.put(TaskPriority, priority)
-        recorder.appendMessage(taskMsg)
-        recorder.appendMessage(createSyntheticSuccessResponse(taskMsg))
+        val params = Iterable[(String, MValue)](TaskPriority -> taskPriority)
+        val request = createSyntheticRequest(taskId, taskToken, "/enqueue", params, taskData)
+        recorder.appendMessage(request)
+        recorder.appendMessage(createSyntheticSuccessResponse(request))
       }
       case None => // TODO
     }
   }
 
-  def ack(id: Timestamp, ackMessage: InMessage) {
-    feeder.pendingEntry(id).flatMap(entry => recorders.get(entry.priority)) match {
+  def ack(taskId: Timestamp) {
+    feeder.pendingEntry(taskId).flatMap(entry => recorders.get(entry.priority)) match {
       case Some(recorder) => {
-        recorder.appendMessage(ackMessage)
-        recorder.appendMessage(createSyntheticSuccessResponse(ackMessage))
+        val request = createSyntheticRequest(taskId, -1, "/ack")
+        recorder.appendMessage(request)
+        recorder.appendMessage(createSyntheticSuccessResponse(request))
       }
       case None => // TODO:
     }
   }
 
   val feeder = new LogQueueFeeder(definition, createPriorityQueueReader)
+
+  private def createSyntheticRequest(taskId: Timestamp, taskToken: Long, path: String,
+                                     params: Iterable[(String, MValue)] = Nil, data: Any = null): InMessage = {
+    val extraParams = Iterable[(String, MValue)](TaskId -> taskId.value, TaskToken -> taskToken)
+    val request = new InMessage(params ++ extraParams, data = data)
+    request.token = taskToken
+    request.timestamp = Some(taskId)
+    request.function = MessageType.FUNCTION_CALL
+    request.path = path
+    request
+  }
 
   private def createSyntheticSuccessResponse(request: InMessage): OutMessage = {
     val response = new OutMessage(code = 200)
