@@ -26,7 +26,7 @@ private[bwl] class QueueResource(getQueue: => (Long, String) => Option[Queue], g
     getQueue(memberToken, queueName) match {
       case Some(queue: Queue) => {
 
-        val taskId = getOrCreateMessageTaskId(message)
+        val taskId: Timestamp = message.timestamp.getOrElse(timestampGenerator.nextId)
         params.optionalParam[Int](TaskPriority) match {
           case Some(priority) => {
             queue.enqueue(taskId, taskToken, priority, message.getData[Any])
@@ -55,16 +55,6 @@ private[bwl] class QueueResource(getQueue: => (Long, String) => Option[Queue], g
     getQueue(memberToken, queueName) match {
       case Some(queue: Queue) => queue.ack(taskId)
       case None => throw new InvalidParameter(s"No queue '$queueName' for shard $memberToken")
-    }
-  }
-
-  /**
-   * Returns the specified message timestamp as task id or a new timestamp if the message lack a timestamp.
-   */
-  private def getOrCreateMessageTaskId(message: InMessage): Timestamp = {
-    message.timestamp match {
-      case Some(timestamp) => timestamp
-      case None => timestampGenerator.nextId
     }
   }
 }
