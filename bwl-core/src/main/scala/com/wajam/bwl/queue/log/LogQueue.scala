@@ -101,13 +101,13 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
    * Queue reader wrapper which ensure that log exists and is NOT empty before creating the real LogQueueReader.
    * Achieved by waiting until TransactionRecorder produces a valid consistent timestamp.
    */
-  class DelayedQueueReader(recorder: TransactionRecorder, createReader: => QueueReader)
+  private class DelayedQueueReader(recorder: TransactionRecorder, createReader: => QueueReader)
       extends Iterator[Option[QueueEntry.Enqueue]] with Closable {
 
     private var reader: Option[QueueReader] = None
 
     private def getOrCreateReader: QueueReader = reader match {
-      case None if recorder.currentConsistentTimestamp.isEmpty => UnclosableEmptyReader
+      case None if recorder.currentConsistentTimestamp.isEmpty => InfiniteEmptyReader
       case None => {
         val itr = createReader
         reader = Some(itr)
@@ -125,7 +125,7 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
     }
   }
 
-  object UnclosableEmptyReader extends Iterator[Option[QueueEntry.Enqueue]] with Closable {
+  private object InfiniteEmptyReader extends Iterator[Option[QueueEntry.Enqueue]] with Closable {
     def hasNext = true
 
     def next() = None
