@@ -15,6 +15,9 @@ import scala.collection.mutable
 import com.wajam.commons.Closable
 import com.wajam.bwl.QueueResource.TaskPriority
 
+/**
+ * Persistent queue using NRV transaction log as backing storage. Each priority is appended to separate log.
+ */
 class LogQueue(val token: Long, service: Service with QueueService, val definition: QueueDefinition,
                recorderFactory: RecorderFactory) extends Queue {
 
@@ -42,6 +45,8 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
     }
   }
 
+  val feeder = new LogQueueFeeder(definition, createPriorityQueueReader)
+
   private def createSyntheticSuccessResponse(request: InMessage): OutMessage = {
     val response = new OutMessage(code = 200)
     request.copyTo(response)
@@ -49,8 +54,10 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
     response
   }
 
-  val feeder = new LogQueueFeeder(definition, createPriorityQueueReader)
-
+  /**
+   * Creates a new LogQueueFeeder.QueueReader. This method is passed as a factory function to the
+   * LogQueueFeeder constructor.
+   */
   private def createPriorityQueueReader(priority: Int, startTimestamp: Option[Timestamp]): QueueReader = {
     val recorder = recorders(priority)
 
@@ -65,11 +72,15 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
     new DelayedQueueReader(recorder, createLogQueueReader)
   }
 
+  /**
+   * Returns the oldest log record timestamp starting the beginning of the transaction log. The records may be written
+   * out of order in the log. So this methods reads more than the initial record returns the oldest timestamp.
+   */
   def findStartTimestamp(txLog: FileTransactionLog): Timestamp = {
     val itr = txLog.read
     try {
-      val first = txLog.firstRecord(timestamp = None)
-      val startRange = itr.takeWhile(_.consistentTimestamp < first.map(_.timestamp)).collect {
+      val firstTimestamp = txLog.firstRecord(timestamp = None).map(_.timestamp)
+      val startRange = itr.takeWhile(_.consistentTimestamp < firstTimestamp).collect {
         case r: TimestampedRecord => r
       }.toVector.sortBy(_.timestamp)
       startRange.head.timestamp
@@ -88,7 +99,7 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
 
   /**
    * Queue reader wrapper which ensure that log exists and is NOT empty before creating the real LogQueueReader.
-   * Achieved by waiting until the recorder produce a valid consistent timestamp.
+   * Achieved by waiting until TransactionRecorder produces a valid consistent timestamp.
    */
   class DelayedQueueReader(recorder: TransactionRecorder, createReader: => QueueReader)
       extends Iterator[Option[QueueEntry.Enqueue]] with Closable {
@@ -96,7 +107,7 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
     private var reader: Option[QueueReader] = None
 
     private def getOrCreateReader: QueueReader = reader match {
-      case None if recorder.currentConsistentTimestamp.isEmpty => EmptyUnclosableReader
+      case None if recorder.currentConsistentTimestamp.isEmpty => UnclosableEmptyReader
       case None => {
         val itr = createReader
         reader = Some(itr)
@@ -114,7 +125,7 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
     }
   }
 
-  object EmptyUnclosableReader extends Iterator[Option[QueueEntry.Enqueue]] with Closable {
+  object UnclosableEmptyReader extends Iterator[Option[QueueEntry.Enqueue]] with Closable {
     def hasNext = true
 
     def next() = None
@@ -129,7 +140,8 @@ object LogQueue {
   type RecorderFactory = (Long, QueueDefinition, Priority) => TransactionRecorder
 
   /**
-   * LogQueue factory method usable as [[com.wajam.bwl.queue.Queue.QueueFactory]] with Bwl service
+   * Creates a new LogQueue. This factory method is usable as [[com.wajam.bwl.queue.Queue.QueueFactory]] with the
+   * Bwl service
    */
   def create(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000)(token: Long, definition: QueueDefinition, service: Service with QueueService): Queue = {
 

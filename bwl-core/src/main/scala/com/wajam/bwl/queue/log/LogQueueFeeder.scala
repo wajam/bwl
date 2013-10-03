@@ -9,6 +9,9 @@ import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.bwl.QueueResource._
 import com.wajam.commons.Closable
 
+/**
+ * Feeder implementation for the LogQueue persistent queue.
+ */
 class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Option[Timestamp]) => QueueReader)
     extends Feeder {
 
