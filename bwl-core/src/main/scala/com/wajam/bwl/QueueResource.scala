@@ -11,7 +11,7 @@ import QueueResource._
 import com.wajam.nrv.service.ServiceMember
 import com.wajam.commons.SynchronizedIdGenerator
 
-class QueueResource(getQueue: => (Long, String) => Option[Queue], getMember: Long => ServiceMember)
+private[bwl] class QueueResource(getQueue: => (Long, String) => Option[Queue], getMember: Long => ServiceMember)
     extends Resource("queues/:token/:name/tasks", "id") with Create with Delete {
 
   private val timestampGenerator = new TimestampIdGenerator with SynchronizedIdGenerator[Long]
@@ -27,16 +27,8 @@ class QueueResource(getQueue: => (Long, String) => Option[Queue], getMember: Lon
       case Some(queue: Queue) => {
 
         // Ensure message has a timestamp
-        val timestamp: Timestamp = message.timestamp match {
-          case Some(ts) => ts
-          case None => {
-            val ts: Timestamp = timestampGenerator.nextId
-            message.timestamp = Some(ts)
-            ts
-          }
-        }
-
-        params.optionalParam[Int](Priority) match {
+        val timestamp = getOrCreateMessageTimestamp(message)
+        params.optionalParam[Int](TaskPriority) match {
           case Some(priority) => {
             queue.enqueue(message, priority)
             message.reply(Map(TaskId -> timestamp.toString))
@@ -61,9 +53,25 @@ class QueueResource(getQueue: => (Long, String) => Option[Queue], getMember: Lon
     val queueName = params.param[String](QueueName)
     val id = params.param[Long](TaskId)
 
+    getOrCreateMessageTimestamp(message)
     getQueue(memberToken, queueName) match {
       case Some(queue: Queue) => queue.ack(id, message)
       case None => throw new InvalidParameter(s"No queue '$queueName' for shard $memberToken")
+    }
+  }
+
+  /**
+   * Returns the specified message timestamp or returns a newly created timestamp if the message lack a timestamp.
+   * The message is also updated with the new timestamp.
+   */
+  private def getOrCreateMessageTimestamp(message: InMessage): Timestamp = {
+    message.timestamp match {
+      case Some(timestamp) => timestamp
+      case None => {
+        val timestamp: Timestamp = timestampGenerator.nextId
+        message.timestamp = Some(timestamp)
+        timestamp
+      }
     }
   }
 }
@@ -72,5 +80,5 @@ object QueueResource {
   val QueueName = "name"
   val TaskToken = "token"
   val TaskId = "id"
-  val Priority = "priority"
+  val TaskPriority = "priority"
 }
