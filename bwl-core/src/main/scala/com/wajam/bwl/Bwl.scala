@@ -9,7 +9,7 @@ import com.wajam.bwl.queue.Queue.QueueFactory
 import com.wajam.spnl._
 import com.wajam.bwl.queue.QueueDefinition
 import com.wajam.nrv.data.MInt
-import com.wajam.nrv.Logging
+import com.wajam.commons.Logging
 
 class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQueue: QueueFactory,
           spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)
@@ -33,7 +33,7 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
 
   applySupport(resolver = Some(new Resolver(tokenExtractor = Resolver.TOKEN_PARAM("token"))))
 
-  val queueResource = new QueueResource(
+  private val queueResource = new QueueResource(
     (token, name) => queues.get(token, name).map(_.queue),
     token => resolveMembers(token, 1).head)
   queueResource.registerTo(this)
