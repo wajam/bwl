@@ -23,7 +23,7 @@ class LogQueueReader(service: QueueService with Service, itr: Iterator[Option[Me
     case Some(data: QueueEntry.Enqueue) => Some(data)
     case None => None
   }.withFilter {
-    case Some(data: QueueEntry.Enqueue) => processed.remove(data.id)
+    case Some(data: QueueEntry.Enqueue) => !processed.remove(data.id)
     case None => true
   }
 
