@@ -41,14 +41,14 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
   /**
    * Enqueue the specified task data and returns the task id if enqueued successfully .
    */
-  def enqueue(token: Long, name: String, task: Any, priority: Option[Int] = None)(implicit ec: ExecutionContext): Future[Long] = {
+  def enqueue(token: Long, name: String, taskData: Any, priority: Option[Int] = None)(implicit ec: ExecutionContext): Future[Long] = {
     import com.wajam.nrv.extension.resource.ParamsAccessor._
     import QueueResource._
 
     val action = queueResource.create(this).get
 
     val params = List[(String, MValue)](TaskToken -> token, QueueName -> name) ++ priority.map(p => TaskPriority -> MInt(p))
-    val result = action.call(params = params, meta = Map(), data = task)
+    val result = action.call(params = params, meta = Map(), data = taskData)
     result.map(response => response.param[Long](TaskId))
   }
 
@@ -90,11 +90,11 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
       }
     }
 
-    val data = request.message.getData[QueueTask.Data]
-    val taskToken = data(TaskToken).toString.toLong
-    val taskId = data(TaskId).toString.toLong
+    val data = request.message.getData[TaskData]
+    val taskToken = data.token
+    val taskId = data.values(TaskId).toString.toLong
 
-    val response = definition.callback(data)
+    val response = definition.callback(data.values("data"))
     response.onSuccess {
       case Result.Ok => {
         ack(taskToken, definition.name, taskId)
