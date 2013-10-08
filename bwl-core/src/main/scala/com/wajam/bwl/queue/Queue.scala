@@ -46,7 +46,7 @@ object Queue {
 }
 
 object QueueTask {
-  type Data = Map[String, Any]
+  type Data = Any
   type Callback = (Data) => Future[Result]
 
   sealed trait Result

@@ -141,11 +141,8 @@ class TestBwl extends FunSuite {
       new BwlFixture with SingleQueueFixture {}.runWithFixture((f) => {
         import ExecutionContext.Implicits.global
 
-        val t = f.bwl.enqueue(0, f.definition.name, "hello")
-        val id = Await.result(t, Duration.Inf)
-
-        val expectedData = Map("token" -> "0", "id" -> id, "priority" -> 1, "data" -> "hello")
-        verify(f.mockCallback, timeout(2000)).process(argEquals(expectedData))
+        f.bwl.enqueue(0, f.definition.name, "hello")
+        verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
         verifyNoMoreInteractions(f.mockCallback)
       })
     }
@@ -157,20 +154,19 @@ class TestBwl extends FunSuite {
     test(queueFactory.name + " - enqueued priority weights should be respected") {
       import ExecutionContext.Implicits.global
 
-      // TODO: something useful with commented out line and replace println() with a better check
       new BwlFixture with MultipleQueueFixture {}.runWithFixture((f) => {
         val enqueued = f.definition.priorities.flatMap(p => 1.to(200).map(i =>
-          f.bwl.enqueue(i, f.definition.name, p.value, Some(p.value))))
-        //  bwl.enqueue(i, double.name, Map("p" -> p.value, "i" -> i), Some(p.value))))
+          f.bwl.enqueue(i, f.definition.name, Map("p" -> p.value, "i" -> i), Some(p.value))))
         Await.result(Future.sequence(enqueued), 5 seconds)
 
         val dataCaptor = ArgumentCaptor.forClass(classOf[Map[String, Any]])
         verify(f.mockCallback, timeout(5000).atLeast(100)).process(dataCaptor.capture())
         val values = dataCaptor.getAllValues.toList
 
-        val p1Count = values.map(_("data")).count(_ == 1)
-        val p2Count = values.map(_("data")).count(_ == 2)
+        val p1Count = values.map(_("p")).count(_ == 1)
+        val p2Count = values.map(_("p")).count(_ == 2)
         p2Count should be > p1Count
+        // TODO: replace println() with a better check
         println(s"1=$p1Count, 2=$p2Count")
       })
     }
