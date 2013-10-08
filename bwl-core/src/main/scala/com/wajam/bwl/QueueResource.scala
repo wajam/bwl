@@ -51,9 +51,10 @@ private[bwl] class QueueResource(getQueue: => (Long, String) => Option[Queue], g
     val memberToken = getMember(taskToken).token
     val queueName = params.param[String](QueueName)
     val taskId = params.param[Long](TaskId)
+    val ackId: Timestamp = message.timestamp.getOrElse(timestampGenerator.nextId)
 
     getQueue(memberToken, queueName) match {
-      case Some(queue: Queue) => queue.ack(taskId)
+      case Some(queue: Queue) => queue.ack(ackId, taskId)
       case None => throw new InvalidParameter(s"No queue '$queueName' for shard $memberToken")
     }
   }
