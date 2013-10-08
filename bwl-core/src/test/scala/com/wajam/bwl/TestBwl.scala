@@ -1,11 +1,11 @@
 package com.wajam.bwl
 
-import org.scalatest.{ BeforeAndAfter, FunSuite }
+import org.scalatest.FunSuite
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
 import com.wajam.nrv.cluster.{ LocalNode, StaticClusterManager, Cluster }
 import com.wajam.nrv.protocol.NrvProtocol
-import com.wajam.bwl.queue.{ QueueTask, Priority, QueueDefinition }
+import com.wajam.bwl.queue._
 import com.wajam.bwl.queue.memory.MemoryQueue
 import scala.concurrent.{ Future, Await, ExecutionContext }
 import scala.concurrent.duration._
@@ -16,48 +16,59 @@ import org.mockito.Mockito._
 import org.scalatest.mock.MockitoSugar
 import org.mockito.ArgumentCaptor
 import scala.collection.JavaConversions._
+import java.io.File
+import java.nio.file.Files
+import com.wajam.nrv.service.Service
+import com.wajam.bwl.queue.log.LogQueue
+import com.wajam.bwl.queue.Priority
+import com.wajam.bwl.queue.QueueDefinition
 
-@RunWith(classOf[JUnitRunner])
-class TestBwl extends FunSuite with BeforeAndAfter with MockitoSugar {
+trait BwlFixture extends MockitoSugar {
 
-  private var bwl: Bwl = null
-  private var cluster: Cluster = null
+  import BwlFixture._
 
-  private var mockCallback: Callback = null
-  private var single: QueueDefinition = null
-  private var weighted: QueueDefinition = null
+  var bwl: Bwl = null
+  var cluster: Cluster = null
+  var mockCallback: Callback = null
 
-  before {
-    val manager = new StaticClusterManager
-    cluster = new Cluster(new LocalNode("localhost", Map("nrv" -> 40373)), manager)
+  def definition: QueueDefinition
 
-    val protocol = new NrvProtocol(cluster.localNode, 5000, 100)
-    cluster.registerProtocol(protocol, default = true)
+  def runWithFixture(test: (BwlFixture) => Any)(implicit queueFactory: QueueFactory) {
+    try {
+      queueFactory.before()
+      mockCallback = mock[Callback]
 
-    mockCallback = mock[Callback]
-    single = QueueDefinition("single", okCallback(mockCallback), createTaskContext)
-    weighted = QueueDefinition("weighted", okCallback(mockCallback), createTaskContext,
-      priorities = List(Priority(1, weight = 33), Priority(2, weight = 66)))
+      val manager = new StaticClusterManager
+      cluster = new Cluster(new LocalNode("localhost", Map("nrv" -> 40373)), manager)
 
-    bwl = new Bwl(definitions = List(single, weighted), createQueue = MemoryQueue.create, spnl = new Spnl)
-    bwl.applySupport(responseTimeout = Some(2000))
-    cluster.registerService(bwl)
-    bwl.addMember(0, cluster.localNode)
+      val protocol = new NrvProtocol(cluster.localNode, 5000, 100)
+      cluster.registerProtocol(protocol, default = true)
 
-    cluster.start()
+      bwl = new Bwl(definitions = List(definition), createQueue = queueFactory.factory, spnl = new Spnl)
+      bwl.applySupport(responseTimeout = Some(2000))
+      cluster.registerService(bwl)
+      bwl.addMember(0, cluster.localNode)
+
+      cluster.start()
+
+      // Execute the test code
+      test(this)
+    } finally {
+      cluster.stop()
+      cluster = null
+      bwl = null
+      mockCallback = null
+      queueFactory.after()
+    }
   }
 
-  after {
-    cluster.stop()
-  }
+  def newTaskContext = new TaskContext(normalRate = 50, throttleRate = 50)
 
-  private def createTaskContext = new TaskContext(normalRate = 50, throttleRate = 50)
-
-  private trait Callback {
+  trait Callback {
     def process(data: QueueTask.Data)
   }
 
-  private def okCallback(callback: Callback)(data: QueueTask.Data): Future[QueueTask.Result] = {
+  def okCallback(callback: Callback)(data: QueueTask.Data): Future[QueueTask.Result] = {
     import scala.concurrent.future
     import ExecutionContext.Implicits.global
 
@@ -66,34 +77,108 @@ class TestBwl extends FunSuite with BeforeAndAfter with MockitoSugar {
       QueueTask.Result.Ok
     }
   }
+}
 
-  test("should enqueue and dequeue expected value") {
-    import ExecutionContext.Implicits.global
+object BwlFixture {
 
-    val t = bwl.enqueue(0, single.name, "hello")
-    val id = Await.result(t, Duration.Inf)
+  trait QueueFactory {
+    type Factory = (Long, QueueDefinition, Service with QueueService) => Queue
 
-    val expectedData = Map("token" -> "0", "id" -> id, "data" -> "hello")
-    verify(mockCallback, timeout(200)).process(argEquals(expectedData))
-    verifyNoMoreInteractions(mockCallback)
+    def name: String
+
+    def before() = {}
+
+    def after() = {}
+
+    def factory: Factory
   }
 
-  test("enqueued priority weights should be respected") {
-    import ExecutionContext.Implicits.global
-
-    val enqueued = weighted.priorities.flatMap(p => 1.to(200).map(i =>
-      bwl.enqueue(i, weighted.name, p.value, Some(p.value))))
-    //  bwl.enqueue(i, double.name, Map("p" -> p.value, "i" -> i), Some(p.value))))
-    Await.result(Future.sequence(enqueued), 2 seconds)
-
-    val dataCaptor = ArgumentCaptor.forClass(classOf[Map[String, Any]])
-    verify(mockCallback, timeout(2000).atLeast(100)).process(dataCaptor.capture())
-    val values = dataCaptor.getAllValues.toList
-
-    val p1Count = values.map(_("data")).count(_ == 1)
-    val p2Count = values.map(_("data")).count(_ == 2)
-    p2Count should be > p1Count
-    println(s"1=$p1Count, 2=$p2Count")
+  def memoryQueueFactory = new QueueFactory {
+    val name = "memory"
+    val factory: Factory = MemoryQueue.create
   }
 
+  def persistentQueueFactory = new QueueFactory {
+    var logDir: File = null
+    var factory: Factory = null
+
+    val name = "persistent"
+
+    override def before() = {
+      logDir = Files.createTempDirectory("TestBwl").toFile
+      factory = LogQueue.create(logDir)
+    }
+
+    override def after() = {
+      logDir.listFiles().foreach(_.delete())
+      logDir.delete()
+      logDir = null
+    }
+  }
+}
+
+trait SingleQueueFixture {
+  this: BwlFixture =>
+
+  lazy val definition = QueueDefinition("single", okCallback(mockCallback), newTaskContext)
+}
+
+trait MultipleQueueFixture {
+  this: BwlFixture =>
+
+  lazy val definition = QueueDefinition("weighted", okCallback(mockCallback), newTaskContext,
+    priorities = List(Priority(1, weight = 33), Priority(2, weight = 66)))
+}
+
+@RunWith(classOf[JUnitRunner])
+class TestBwl extends FunSuite {
+
+  import BwlFixture._
+
+  def singlePriorityQueue(implicit queueFactory: QueueFactory) {
+
+    test(queueFactory.name + " - queue should enqueue and dequeue expected value") {
+      new BwlFixture with SingleQueueFixture {}.runWithFixture((f) => {
+        import ExecutionContext.Implicits.global
+
+        val t = f.bwl.enqueue(0, f.definition.name, "hello")
+        val id = Await.result(t, Duration.Inf)
+
+        val expectedData = Map("token" -> "0", "id" -> id, "priority" -> 1, "data" -> "hello")
+        verify(f.mockCallback, timeout(2000)).process(argEquals(expectedData))
+        verifyNoMoreInteractions(f.mockCallback)
+      })
+    }
+
+  }
+
+  def multiplePrioritiesQueue(implicit queueFactory: QueueFactory) {
+
+    test(queueFactory.name + " - enqueued priority weights should be respected") {
+      import ExecutionContext.Implicits.global
+
+      // TODO: something useful with commented out line and replace println() with a better check
+      new BwlFixture with MultipleQueueFixture {}.runWithFixture((f) => {
+        val enqueued = f.definition.priorities.flatMap(p => 1.to(200).map(i =>
+          f.bwl.enqueue(i, f.definition.name, p.value, Some(p.value))))
+        //  bwl.enqueue(i, double.name, Map("p" -> p.value, "i" -> i), Some(p.value))))
+        Await.result(Future.sequence(enqueued), 5 seconds)
+
+        val dataCaptor = ArgumentCaptor.forClass(classOf[Map[String, Any]])
+        verify(f.mockCallback, timeout(5000).atLeast(100)).process(dataCaptor.capture())
+        val values = dataCaptor.getAllValues.toList
+
+        val p1Count = values.map(_("data")).count(_ == 1)
+        val p2Count = values.map(_("data")).count(_ == 2)
+        p2Count should be > p1Count
+        println(s"1=$p1Count, 2=$p2Count")
+      })
+    }
+
+  }
+
+  testsFor(singlePriorityQueue(memoryQueueFactory))
+  testsFor(multiplePrioritiesQueue(memoryQueueFactory))
+  testsFor(singlePriorityQueue(persistentQueueFactory))
+  testsFor(multiplePrioritiesQueue(persistentQueueFactory))
 }

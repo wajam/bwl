@@ -39,10 +39,10 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
     }
   }
 
-  def ack(taskId: Timestamp) {
+  def ack(ackId: Timestamp, taskId: Timestamp) {
     feeder.pendingEntry(taskId).flatMap(entry => recorders.get(entry.priority)) match {
       case Some(recorder) => {
-        val request = createSyntheticRequest(taskId, -1, "/ack")
+        val request = createSyntheticRequest(ackId, -1, "/ack")
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
       }
