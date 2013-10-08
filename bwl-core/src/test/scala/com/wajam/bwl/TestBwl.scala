@@ -157,6 +157,7 @@ class TestBwl extends FunSuite {
     test(queueFactory.name + " - enqueued priority weights should be respected") {
       import ExecutionContext.Implicits.global
 
+      // TODO: something useful with commented out line and replace println() with a better check
       new BwlFixture with MultipleQueueFixture {}.runWithFixture((f) => {
         val enqueued = f.definition.priorities.flatMap(p => 1.to(200).map(i =>
           f.bwl.enqueue(i, f.definition.name, p.value, Some(p.value))))
