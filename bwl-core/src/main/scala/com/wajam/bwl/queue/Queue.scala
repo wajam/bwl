@@ -32,7 +32,7 @@ trait Queue {
 
   def enqueue(taskId: Timestamp, taskToken: Long, taskPriority: Int, taskData: Any)
 
-  def ack(taskId: Timestamp)
+  def ack(ackId: Timestamp, taskId: Timestamp)
 
   def feeder: Feeder
 

@@ -21,11 +21,11 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queu
   private val randomTaskIterator = PeekIterator(Iterator.continually(queues(selector.next).poll()))
 
   def enqueue(taskId: Timestamp, taskToken: Long, taskPriority: Int, taskData: Any) {
-    val data = Map("token" -> taskToken.toString, "id" -> taskId.value, "data" -> taskData)
+    val data = Map("token" -> taskToken.toString, "id" -> taskId.value, "priority" -> taskPriority, "data" -> taskData)
     queues(taskPriority).offer(data)
   }
 
-  def ack(taskId: Timestamp) {
+  def ack(ackId: Timestamp, taskId: Timestamp) {
     // No-op. Memory queues are not persisted.
   }
 
