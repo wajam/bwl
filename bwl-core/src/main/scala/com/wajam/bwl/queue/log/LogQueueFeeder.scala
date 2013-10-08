@@ -1,7 +1,7 @@
 package com.wajam.bwl.queue.log
 
 import com.wajam.spnl.feeder.Feeder
-import com.wajam.spnl.{TaskData, TaskContext}
+import com.wajam.spnl.{ TaskData, TaskContext }
 import com.wajam.bwl.queue.{ QueueTask, QueueDefinition, PrioritySelector }
 import com.wajam.bwl.utils.PeekIterator
 import com.wajam.bwl.queue.log.LogQueueFeeder.QueueReader

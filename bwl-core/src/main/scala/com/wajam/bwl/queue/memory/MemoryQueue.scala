@@ -4,7 +4,7 @@ import com.wajam.bwl.queue._
 import com.wajam.nrv.utils.timestamp.Timestamp
 import java.util.concurrent.ConcurrentLinkedQueue
 import com.wajam.spnl.feeder.Feeder
-import com.wajam.spnl.{TaskData, TaskContext}
+import com.wajam.spnl.{ TaskData, TaskContext }
 import com.wajam.bwl.utils.PeekIterator
 import com.wajam.nrv.service.Service
 

@@ -141,10 +141,7 @@ class TestBwl extends FunSuite {
       new BwlFixture with SingleQueueFixture {}.runWithFixture((f) => {
         import ExecutionContext.Implicits.global
 
-        val t = f.bwl.enqueue(0, f.definition.name, "hello")
-        val id = Await.result(t, Duration.Inf)
-
-        val expectedData = Map("token" -> "0", "id" -> id, "priority" -> 1, "data" -> "hello")
+        f.bwl.enqueue(0, f.definition.name, "hello")
         verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
         verifyNoMoreInteractions(f.mockCallback)
       })
