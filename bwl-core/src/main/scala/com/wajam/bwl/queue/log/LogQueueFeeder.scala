@@ -1,7 +1,7 @@
 package com.wajam.bwl.queue.log
 
 import com.wajam.spnl.feeder.Feeder
-import com.wajam.spnl.TaskContext
+import com.wajam.spnl.{ TaskData, TaskContext }
 import com.wajam.bwl.queue.{ QueueTask, QueueDefinition, PrioritySelector }
 import com.wajam.bwl.utils.PeekIterator
 import com.wajam.bwl.queue.log.LogQueueFeeder.QueueReader
@@ -22,8 +22,9 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
   // Collection of non-acknowledged entries
   private var pendingEntries: Map[Timestamp, QueueEntry.Enqueue] = Map()
 
-  implicit def entry2data(entry: Option[QueueEntry.Enqueue]): Option[QueueTask.Data] = {
-    entry.map(d => Map("token" -> d.token.toString, "id" -> d.id.value, "priority" -> d.priority, "data" -> d.data))
+  implicit def entry2data(entry: Option[QueueEntry.Enqueue]): Option[TaskData] = {
+    entry.map(d => TaskData(d.token,
+      Map("token" -> d.token, "id" -> d.id.value, "priority" -> d.priority, "data" -> d.data)))
   }
 
   def name = definition.name
@@ -59,9 +60,9 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
     }
   }
 
-  def ack(data: Map[String, Any]) {
+  def ack(data: TaskData) {
     // TODO: update task context with oldest acknowledged timestamp for the acknowledged priority
-    pendingEntries -= data(TaskId).toString.toLong
+    pendingEntries -= data.values(TaskId).toString.toLong
   }
 
   def kill() {
