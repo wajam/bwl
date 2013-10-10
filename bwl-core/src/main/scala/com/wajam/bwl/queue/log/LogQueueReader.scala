@@ -8,30 +8,44 @@ import com.wajam.nrv.service.Service
 import com.wajam.commons.Closable
 
 /**
- * Reader which returns only unprocessed tasks. Tasks present in the `processed` set are skip and the set updated.
- * This set is initialized by reading the logs to the end before creating this reader.
+ * Readers which returns unprocessed tasks
  */
-class LogQueueReader(service: QueueService with Service, itr: Iterator[Option[Message]] with Closable,
-                     processed: mutable.Set[Timestamp]) extends Iterator[Option[QueueEntry.Enqueue]] with Closable {
+trait LogQueueReader extends Iterator[Option[QueueEntry.Task]] with Closable {
+  /**
+   * Returns delayed entries ordered from the oldest to the newest tasks
+   */
+  def delayedEntries: Iterable[QueueEntry.Task]
+}
 
-  import QueueEntry.message2entry
+object LogQueueReader {
+  /**
+   * Creates a reader which returns only unprocessed tasks. Tasks present in the `processed` set are skip and the set updated.
+   * This set is initialized by reading the logs to the end before creating this reader.
+   */
+  def apply(service: QueueService with Service, itr: Iterator[Option[Message]] with Closable,
+            processed: mutable.Set[Timestamp]): LogQueueReader = {
+    new LogQueueReader {
 
-  val enqueueEntries: Iterator[Option[QueueEntry.Enqueue]] = itr.map {
-    case Some(msg) => message2entry(msg, service)
-    case None => None
-  }.collect {
-    case Some(data: QueueEntry.Enqueue) => Some(data)
-    case None => None
-  }.withFilter {
-    case Some(data: QueueEntry.Enqueue) => !processed.remove(data.id)
-    case None => true
-  }
+      import QueueEntry.message2entry
 
-  def hasNext = enqueueEntries.hasNext
+      val enqueueEntries: Iterator[Option[QueueEntry.Task]] = itr.map {
+        case Some(msg) => message2entry(msg, service)
+        case None => None
+      }.collect {
+        case Some(data: QueueEntry.Task) if !processed.remove(data.id) => Some(data)
+        case None => None
+      }
 
-  def next() = enqueueEntries.next()
+      def hasNext = enqueueEntries.hasNext
 
-  def close() {
-    itr.close()
+      def next() = enqueueEntries.next()
+
+      def close() {
+        itr.close()
+      }
+
+      // TODO: support delayed entries
+      def delayedEntries: Iterable[QueueEntry.Task] = Nil
+    }
   }
 }
