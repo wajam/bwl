@@ -10,10 +10,8 @@ import com.wajam.nrv.consistency.{ ConsistencyMasterSlave, ResolvedServiceMember
 import com.wajam.bwl.queue.log.LogQueue.RecorderFactory
 import com.wajam.nrv.service.Service
 import com.wajam.nrv.consistency.log.{ TimestampedRecord, FileTransactionLog }
-import com.wajam.bwl.queue.log.LogQueueFeeder.QueueReader
 import com.wajam.nrv.consistency.replication.TransactionLogReplicationIterator
 import scala.collection.mutable
-import com.wajam.commons.Closable
 import com.wajam.bwl.QueueResource._
 import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
@@ -40,7 +38,7 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
   }
 
   def ack(ackId: Timestamp, taskId: Timestamp) {
-    feeder.pendingEntry(taskId).flatMap(entry => recorders.get(entry.priority)) match {
+    feeder.pendingTaskPriorityFor(taskId).flatMap(priority => recorders.get(priority)) match {
       case Some(recorder) => {
         val request = createSyntheticRequest(ackId, -1, "/ack")
         recorder.appendMessage(request)
@@ -74,15 +72,15 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
    * Creates a new LogQueueFeeder.QueueReader. This method is passed as a factory function to the
    * LogQueueFeeder constructor.
    */
-  private def createPriorityQueueReader(priority: Int, startTimestamp: Option[Timestamp]): QueueReader = {
+  private def createPriorityQueueReader(priority: Int, startTimestamp: Option[Timestamp]): LogQueueReader = {
     val recorder = recorders(priority)
 
-    def createLogQueueReader: QueueReader = {
+    def createLogQueueReader: LogQueueReader = {
       // TODO: rebuild in-memory priority states including 'reloadedAck'
       val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
       val itr = new TransactionLogReplicationIterator(recorder.member,
         startTimestamp.getOrElse(findStartTimestamp(txLog)), txLog, recorder.currentConsistentTimestamp)
-      new LogQueueReader(service, itr, reloadedAck)
+      LogQueueReader(service, itr, reloadedAck)
     }
 
     new DelayedQueueReader(recorder, createLogQueueReader)
@@ -93,15 +91,13 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
    * out of order in the log. So this methods reads more than the initial record returns the oldest timestamp.
    */
   def findStartTimestamp(txLog: FileTransactionLog): Timestamp = {
-    val itr = txLog.read
-    try {
+    import com.wajam.commons.Closable.using
+    using(txLog.read) { itr =>
       val firstTimestamp = txLog.firstRecord(timestamp = None).map(_.timestamp)
       val startRange = itr.takeWhile(_.consistentTimestamp < firstTimestamp).collect {
-        case r: TimestampedRecord => r
-      }.toVector.sortBy(_.timestamp)
-      startRange.head.timestamp
-    } finally {
-      itr.close()
+        case r: TimestampedRecord => r.timestamp.value
+      }.min
+      startRange
     }
   }
 
@@ -117,12 +113,12 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
    * Queue reader wrapper which ensure that log exists and is NOT empty before creating the real LogQueueReader.
    * Achieved by waiting until TransactionRecorder produces a valid consistent timestamp.
    */
-  private class DelayedQueueReader(recorder: TransactionRecorder, createReader: => QueueReader)
-      extends Iterator[Option[QueueEntry.Enqueue]] with Closable {
+  private class DelayedQueueReader(recorder: TransactionRecorder, createReader: => LogQueueReader)
+      extends LogQueueReader {
 
-    private var reader: Option[QueueReader] = None
+    private var reader: Option[LogQueueReader] = None
 
-    private def getOrCreateReader: QueueReader = reader match {
+    private def getOrCreateReader: LogQueueReader = reader match {
       case None if recorder.currentConsistentTimestamp.isEmpty => InfiniteEmptyReader
       case None => {
         val itr = createReader
@@ -139,14 +135,18 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
     def close() {
       reader.foreach(_.close())
     }
+
+    def delayedEntries = getOrCreateReader.delayedEntries
   }
 
-  private object InfiniteEmptyReader extends Iterator[Option[QueueEntry.Enqueue]] with Closable {
+  private object InfiniteEmptyReader extends LogQueueReader {
     def hasNext = true
 
     def next() = None
 
     def close() {}
+
+    def delayedEntries = Nil
   }
 
 }

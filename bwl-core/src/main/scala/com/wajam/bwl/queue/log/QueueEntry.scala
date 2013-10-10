@@ -11,7 +11,7 @@ sealed trait QueueEntry
 
 object QueueEntry {
 
-  case class Enqueue(id: Timestamp, token: Long, priority: Int, data: Any) extends QueueEntry
+  case class Task(id: Timestamp, token: Long, priority: Int, data: Any) extends QueueEntry
 
   case class Ack(id: Timestamp) extends QueueEntry
 
@@ -20,7 +20,7 @@ object QueueEntry {
   def message2entry(message: Message, service: QueueService with Service): Option[QueueEntry] = {
     message.function match {
       case MessageType.FUNCTION_CALL if message.path == "/enqueue" => {
-        message.timestamp.map(QueueEntry.Enqueue(_, message.token, message.param[Int](TaskPriority), message.getData[Any]))
+        message.timestamp.map(QueueEntry.Task(_, message.token, message.param[Int](TaskPriority), message.getData[Any]))
       }
       case MessageType.FUNCTION_CALL if message.path == "/ack" => message.timestamp.map(QueueEntry.Ack)
       case MessageType.FUNCTION_RESPONSE => Some(QueueEntry.Response)
