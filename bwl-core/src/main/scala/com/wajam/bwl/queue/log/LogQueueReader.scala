@@ -32,11 +32,8 @@ object LogQueueReader {
         case Some(msg) => message2entry(msg, service)
         case None => None
       }.collect {
-        case Some(data: QueueEntry.Task) => Some(data)
+        case Some(data: QueueEntry.Task) if !processed.remove(data.id) => Some(data)
         case None => None
-      }.withFilter {
-        case Some(data: QueueEntry.Task) => !processed.remove(data.id)
-        case None => true
       }
 
       def hasNext = enqueueEntries.hasNext
