@@ -38,7 +38,7 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
   }
 
   def ack(ackId: Timestamp, taskId: Timestamp) {
-    feeder.pendingTaskPriority(taskId).flatMap(priority => recorders.get(priority)) match {
+    feeder.pendingTaskPriorityFor(taskId).flatMap(priority => recorders.get(priority)) match {
       case Some(recorder) => {
         val request = createSyntheticRequest(ackId, -1, "/ack")
         recorder.appendMessage(request)
@@ -92,15 +92,12 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
    */
   def findStartTimestamp(txLog: FileTransactionLog): Timestamp = {
     import com.wajam.commons.Closable.using
-    using(txLog.read) {
-      itr =>
-        {
-          val firstTimestamp = txLog.firstRecord(timestamp = None).map(_.timestamp)
-          val startRange = itr.takeWhile(_.consistentTimestamp < firstTimestamp).collect {
-            case r: TimestampedRecord => r
-          }.toVector.sortBy(_.timestamp)
-          startRange.head.timestamp
-        }
+    using(txLog.read) { itr =>
+      val firstTimestamp = txLog.firstRecord(timestamp = None).map(_.timestamp)
+      val startRange = itr.takeWhile(_.consistentTimestamp < firstTimestamp).collect {
+        case r: TimestampedRecord => r.timestamp.value
+      }.min
+      startRange
     }
   }
 

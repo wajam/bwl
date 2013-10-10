@@ -33,9 +33,9 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
     taskContext = context
 
     // Initialize the position trackers (one per priority). The initial tracked position is loaded from the TaskContext
-    trackers = definition.priorities.map(_.value).map(priority => {
-      val initial = taskContext.data.get(priority.toString).map(value => Timestamp(value.toString.toLong))
-      (priority, new FeederPositionTracker[Timestamp](initial))
+    trackers = definition.priorities.map(priority => {
+      val initial = taskContext.data.get(priority.value.toString).map(value => Timestamp(value.toString.toLong))
+      (priority.value, new FeederPositionTracker[Timestamp](initial))
     }).toMap
 
     // Initialize the priority readers (one per priority)
@@ -91,7 +91,7 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
     readers.valuesIterator.foreach(_.close())
   }
 
-  def pendingTaskPriority(taskId: Timestamp): Option[Int] = trackers.collectFirst {
+  def pendingTaskPriorityFor(taskId: Timestamp): Option[Int] = trackers.collectFirst {
     case (priority, pendingIds) if pendingIds.contains(taskId) => priority
   }
 }
