@@ -4,7 +4,7 @@ import com.wajam.spnl.feeder.Feeder
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.bwl.utils.WeightedItemsSelector
 import com.wajam.nrv.service.Service
-import com.wajam.spnl.TaskContext
+import com.wajam.spnl.{ TaskData, TaskContext }
 import scala.concurrent.Future
 
 // TODO: keep this???
@@ -28,6 +28,22 @@ object QueueItem {
 
   case class Ack(ackId: Timestamp, taskId: Timestamp) extends QueueItem
 
+  implicit def item2data(item: QueueItem.Task): TaskData = {
+    TaskData(item.token, Map("token" -> item.token, "id" -> item.taskId.value,
+      "priority" -> item.priority, "data" -> item.data))
+  }
+
+  implicit val TaskOrdering = new Ordering[QueueItem.Task] {
+    def compare(x: QueueItem.Task, y: QueueItem.Task) = x.taskId.compareTo(y.taskId)
+  }
+}
+
+trait QueueStats {
+  def totalTasks: Int
+
+  def pendingTasks: Iterable[QueueItem.Task]
+
+  def delayedTasks: Iterable[QueueItem.Task]
 }
 
 trait Queue {
@@ -45,6 +61,8 @@ trait Queue {
   def ack(ackItem: QueueItem.Ack)
 
   def feeder: Feeder
+
+  def stats: QueueStats
 
   def start()
 

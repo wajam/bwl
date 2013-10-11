@@ -22,8 +22,9 @@ import com.wajam.bwl.queue.QueueDefinition
 class LogQueue(val token: Long, service: Service with QueueService, val definition: QueueDefinition,
                recorderFactory: RecorderFactory) extends Queue {
 
-  val recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
-  val reloadedAck: mutable.Set[Timestamp] = mutable.Set()
+  private val recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
+
+  private var totalTaskCount = 0
 
   def enqueue(taskItem: QueueItem.Task) {
     recorders.get(taskItem.priority) match {
@@ -49,6 +50,8 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
   }
 
   val feeder = new LogQueueFeeder(definition, createPriorityQueueReader)
+
+  def stats: QueueStats = LogQueueStats
 
   private def createSyntheticRequest(taskId: Timestamp, taskToken: Long, path: String,
                                      params: Iterable[(String, MValue)] = Nil, data: Any = null): InMessage = {
@@ -76,14 +79,47 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
     val recorder = recorders(priority)
 
     def createLogQueueReader: LogQueueReader = {
-      // TODO: rebuild in-memory priority states including 'reloadedAck'
       val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
+      val initialTimestamp = startTimestamp.getOrElse(findStartTimestamp(txLog))
+
+      // TODO: rebuild in-memory priority states
+      val (total, processed) = rebuildPriorityQueueState(priority, initialTimestamp)
+      totalTaskCount += total
+
       val itr = new TransactionLogReplicationIterator(recorder.member,
-        startTimestamp.getOrElse(findStartTimestamp(txLog)), txLog, recorder.currentConsistentTimestamp)
-      LogQueueReader(service, itr, reloadedAck)
+        initialTimestamp, txLog, recorder.currentConsistentTimestamp)
+      LogQueueReader(service, itr, processed)
     }
 
     new DelayedQueueReader(recorder, createLogQueueReader)
+  }
+
+  private def rebuildPriorityQueueState(priority: Int, initialTimestamp: Timestamp): (Int, mutable.Set[Timestamp]) = {
+
+    import com.wajam.commons.Closable.using
+    import LogQueue.message2item
+
+    val recorder = recorders(priority)
+    val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
+    val member = recorder.member
+
+    using(new TransactionLogReplicationIterator(member, initialTimestamp, txLog, Some(Long.MaxValue))) { itr =>
+      val items = for (msgOpt <- itr; msg <- msgOpt; item <- message2item(msg, service)) yield item
+
+      // TODO: do not read beyond max timestamp which is the oldest item appended after the queue start
+      var all = mutable.Set[Timestamp]()
+      var processed = mutable.Set[Timestamp]()
+      items.foreach {
+        case item: QueueItem.Task => all += item.taskId
+        case item: QueueItem.Ack => {
+          if (all.remove(item.taskId)) {
+            processed += item.taskId
+          }
+        }
+      }
+
+      (all.size, processed)
+    }
   }
 
   /**
@@ -147,6 +183,14 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
     def close() {}
 
     def delayedTasks = Nil
+  }
+
+  private object LogQueueStats extends QueueStats {
+    def totalTasks = totalTaskCount
+
+    def pendingTasks = feeder.pendingTasks.toIterable
+
+    def delayedTasks = feeder.delayedTasks.toIterable
   }
 
 }
