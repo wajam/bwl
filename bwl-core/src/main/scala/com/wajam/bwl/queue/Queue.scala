@@ -4,8 +4,9 @@ import com.wajam.spnl.feeder.Feeder
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.bwl.utils.WeightedItemsSelector
 import com.wajam.nrv.service.Service
-import com.wajam.spnl.{ TaskData, TaskContext }
+import com.wajam.spnl.TaskContext
 import scala.concurrent.Future
+import com.wajam.spnl.feeder.Feeder.FeederData
 
 // TODO: keep this???
 trait QueueService {
@@ -28,9 +29,8 @@ object QueueItem {
 
   case class Ack(ackId: Timestamp, taskId: Timestamp) extends QueueItem
 
-  implicit def item2data(item: QueueItem.Task): TaskData = {
-    TaskData(item.token, Map("token" -> item.token, "id" -> item.taskId.value,
-      "priority" -> item.priority, "data" -> item.data))
+  implicit def item2data(item: QueueItem.Task): FeederData = {
+    Map("token" -> item.token, "id" -> item.taskId.value, "priority" -> item.priority, "data" -> item.data)
   }
 
   implicit val TaskOrdering = new Ordering[QueueItem.Task] {

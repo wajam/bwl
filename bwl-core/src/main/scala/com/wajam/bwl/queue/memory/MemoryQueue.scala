@@ -8,9 +8,9 @@ import com.wajam.bwl.utils.PeekIterator
 import com.wajam.nrv.service.Service
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.bwl.QueueResource._
-import com.wajam.bwl.queue.QueueDefinition
-import com.wajam.spnl.TaskData
 import scala.collection.immutable.TreeMap
+import com.wajam.spnl.feeder.Feeder._
+import com.wajam.bwl.queue.QueueDefinition
 
 /**
  * Simple memory queue. MUST not be used in production.
@@ -39,7 +39,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queu
       // No-op. Memory queues are not persisted.
     }
 
-    def peek(): Option[TaskData] = {
+    def peek(): Option[FeederData] = {
       import QueueItem.item2data
 
       randomTaskIterator.peek match {
@@ -52,7 +52,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queu
       }
     }
 
-    def next(): Option[TaskData] = {
+    def next(): Option[FeederData] = {
       import QueueItem.item2data
 
       randomTaskIterator.next() match {
@@ -64,8 +64,8 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queu
       }
     }
 
-    def ack(data: TaskData) {
-      val taskId = data.values(TaskId).toString.toLong
+    def ack(data: FeederData) {
+      val taskId = data(TaskId).toString.toLong
       pendingTasks -= taskId
     }
 
