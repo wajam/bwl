@@ -1,11 +1,13 @@
 package com.wajam.bwl.queue.log
 
 import com.wajam.spnl.feeder.Feeder
-import com.wajam.spnl.{ TaskData, TaskContext }
-import com.wajam.bwl.queue.{ QueueDefinition, PrioritySelector }
+import com.wajam.spnl.TaskContext
+import com.wajam.bwl.queue.PrioritySelector
 import com.wajam.bwl.utils.{ FeederPositionTracker, PeekIterator }
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.bwl.QueueResource._
+import com.wajam.spnl.feeder.Feeder._
+import com.wajam.bwl.queue.QueueDefinition
 
 /**
  * Feeder implementation for the LogQueue persistent queue.
@@ -20,9 +22,8 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
   // Keep track of non-acknowledged entries and oldest entry per priority
   private var trackers: Map[Int, FeederPositionTracker[Timestamp]] = Map()
 
-  implicit def entry2data(entry: Option[QueueEntry.Task]): Option[TaskData] = {
-    entry.map(d => TaskData(d.token,
-      Map("token" -> d.token, "id" -> d.id.value, "priority" -> d.priority, "data" -> d.data)))
+  implicit def entry2data(entry: Option[QueueEntry.Task]): Option[FeederData] = {
+    entry.map(d => Map("token" -> d.token, "id" -> d.id.value, "priority" -> d.priority, "data" -> d.data))
   }
 
   private var taskContext: TaskContext = null
@@ -70,9 +71,9 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
     }
   }
 
-  def ack(data: TaskData) {
-    val priority = data.values(TaskPriority).toString.toInt
-    val taskId = data.values(TaskId).toString.toLong
+  def ack(data: FeederData) {
+    val priority = data(TaskPriority).toString.toInt
+    val taskId = data(TaskId).toString.toLong
     trackers(priority) -= taskId
 
     // Update task context with oldest processed or delayed item for the acknowledged item priority
