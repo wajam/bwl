@@ -3,18 +3,18 @@ package com.wajam.bwl.queue.log
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.nrv.data.Message
 import scala.collection.mutable
-import com.wajam.bwl.queue.QueueService
+import com.wajam.bwl.queue.{ QueueItem, QueueService }
 import com.wajam.nrv.service.Service
 import com.wajam.commons.Closable
 
 /**
  * Readers which returns unprocessed tasks
  */
-trait LogQueueReader extends Iterator[Option[QueueEntry.Task]] with Closable {
+trait LogQueueReader extends Iterator[Option[QueueItem.Task]] with Closable {
   /**
-   * Returns delayed entries ordered from the oldest to the newest tasks
+   * Returns delayed task items ordered from the oldest to the newest tasks
    */
-  def delayedEntries: Iterable[QueueEntry.Task]
+  def delayedTasks: Iterable[QueueItem.Task]
 }
 
 object LogQueueReader {
@@ -26,26 +26,26 @@ object LogQueueReader {
             processed: mutable.Set[Timestamp]): LogQueueReader = {
     new LogQueueReader {
 
-      import QueueEntry.message2entry
+      import LogQueue.message2item
 
-      val enqueueEntries: Iterator[Option[QueueEntry.Task]] = itr.map {
-        case Some(msg) => message2entry(msg, service)
+      val taskItems: Iterator[Option[QueueItem.Task]] = itr.map {
+        case Some(msg) => message2item(msg, service)
         case None => None
       }.collect {
-        case Some(data: QueueEntry.Task) if !processed.remove(data.id) => Some(data)
+        case Some(data: QueueItem.Task) if !processed.remove(data.taskId) => Some(data)
         case None => None
       }
 
-      def hasNext = enqueueEntries.hasNext
+      def hasNext = taskItems.hasNext
 
-      def next() = enqueueEntries.next()
+      def next() = taskItems.next()
 
       def close() {
         itr.close()
       }
 
-      // TODO: support delayed entries
-      def delayedEntries: Iterable[QueueEntry.Task] = Nil
+      // TODO: support delayed tasks
+      def delayedTasks: Iterable[QueueItem.Task] = Nil
     }
   }
 }

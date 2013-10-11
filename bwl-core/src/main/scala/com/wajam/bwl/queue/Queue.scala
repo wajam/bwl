@@ -20,6 +20,16 @@ class PrioritySelector(priorities: Iterable[Priority])
 case class QueueDefinition(name: String, callback: QueueTask.Callback, taskContext: TaskContext = new TaskContext,
                            priorities: Iterable[Priority] = Seq(Priority(1, weight = 1)))
 
+sealed trait QueueItem
+
+object QueueItem {
+
+  case class Task(taskId: Timestamp, token: Long, priority: Int, data: Any) extends QueueItem
+
+  case class Ack(ackId: Timestamp, taskId: Timestamp) extends QueueItem
+
+}
+
 trait Queue {
 
   def token: Long
@@ -30,9 +40,9 @@ trait Queue {
 
   def priorities: Iterable[Priority] = definition.priorities
 
-  def enqueue(taskId: Timestamp, taskToken: Long, taskPriority: Int, taskData: Any)
+  def enqueue(taskItem: QueueItem.Task)
 
-  def ack(ackId: Timestamp, taskId: Timestamp)
+  def ack(ackItem: QueueItem.Ack)
 
   def feeder: Feeder
 

@@ -1,7 +1,6 @@
 package com.wajam.bwl.queue.memory
 
 import com.wajam.bwl.queue._
-import com.wajam.nrv.utils.timestamp.Timestamp
 import java.util.concurrent.ConcurrentLinkedQueue
 import com.wajam.spnl.feeder.Feeder
 import com.wajam.spnl.{ TaskData, TaskContext }
@@ -18,13 +17,13 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queu
 
   private val randomTaskIterator = PeekIterator(Iterator.continually(queues(selector.next).poll()))
 
-  def enqueue(taskId: Timestamp, taskToken: Long, taskPriority: Int, taskData: Any) {
-    val data = TaskData(taskToken,
-      Map("token" -> taskToken, "id" -> taskId.value, "priority" -> taskPriority, "data" -> taskData))
-    queues(taskPriority).offer(data)
+  def enqueue(taskItem: QueueItem.Task) {
+    val data = TaskData(taskItem.token,
+      Map("token" -> taskItem.token, "id" -> taskItem.taskId.value, "priority" -> taskItem.priority, "data" -> taskItem.data))
+    queues(taskItem.priority).offer(data)
   }
 
-  def ack(ackId: Timestamp, taskId: Timestamp) {
+  def ack(ackItem: QueueItem.Ack) {
     // No-op. Memory queues are not persisted.
   }
 

@@ -1,6 +1,6 @@
 package com.wajam.bwl.queue.log
 
-import com.wajam.bwl.queue.{ QueueService, Queue }
+import com.wajam.bwl.queue._
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.nrv.data._
 import com.wajam.nrv.data.MValue._
@@ -25,11 +25,11 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
   val recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
   val reloadedAck: mutable.Set[Timestamp] = mutable.Set()
 
-  def enqueue(taskId: Timestamp, taskToken: Long, taskPriority: Int, taskData: Any) {
-    recorders.get(taskPriority) match {
+  def enqueue(taskItem: QueueItem.Task) {
+    recorders.get(taskItem.priority) match {
       case Some(recorder) => {
-        val params = Iterable[(String, MValue)](TaskPriority -> taskPriority)
-        val request = createSyntheticRequest(taskId, taskToken, "/enqueue", params, taskData)
+        val params = Iterable[(String, MValue)](TaskPriority -> taskItem.priority)
+        val request = createSyntheticRequest(taskItem.taskId, taskItem.token, "/enqueue", params, taskItem.data)
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
       }
@@ -37,10 +37,10 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
     }
   }
 
-  def ack(ackId: Timestamp, taskId: Timestamp) {
-    feeder.pendingTaskPriorityFor(taskId).flatMap(priority => recorders.get(priority)) match {
+  def ack(ackItem: QueueItem.Ack) {
+    feeder.pendingTaskPriorityFor(ackItem.taskId).flatMap(priority => recorders.get(priority)) match {
       case Some(recorder) => {
-        val request = createSyntheticRequest(ackId, -1, "/ack")
+        val request = createSyntheticRequest(ackItem.ackId, -1, "/ack")
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
       }
@@ -136,7 +136,7 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
       reader.foreach(_.close())
     }
 
-    def delayedEntries = getOrCreateReader.delayedEntries
+    def delayedTasks = getOrCreateReader.delayedTasks
   }
 
   private object InfiniteEmptyReader extends LogQueueReader {
@@ -146,7 +146,7 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
 
     def close() {}
 
-    def delayedEntries = Nil
+    def delayedTasks = Nil
   }
 
 }
@@ -179,5 +179,17 @@ object LogQueue {
     }
 
     new LogQueue(token, service, definition, createRecorder)
+  }
+
+  def message2item(message: Message, service: QueueService with Service): Option[QueueItem] = {
+    import com.wajam.nrv.extension.resource.ParamsAccessor._
+
+    message.function match {
+      case MessageType.FUNCTION_CALL if message.path == "/enqueue" => {
+        message.timestamp.map(QueueItem.Task(_, message.token, message.param[Int](TaskPriority), message.getData[Any]))
+      }
+      case MessageType.FUNCTION_CALL if message.path == "/ack" => message.timestamp.map(QueueItem.Ack(_, message.param[Long](TaskId)))
+      case _ => None
+    }
   }
 }

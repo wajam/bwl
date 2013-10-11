@@ -2,7 +2,7 @@ package com.wajam.bwl
 
 import com.wajam.nrv.extension.resource._
 import com.wajam.nrv.extension.resource.ParamsAccessor._
-import com.wajam.bwl.queue.Queue
+import com.wajam.bwl.queue.{ QueueItem, Queue }
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.nrv.InvalidParameter
 import com.wajam.nrv.utils.TimestampIdGenerator
@@ -27,18 +27,19 @@ private[bwl] class QueueResource(getQueue: => (Long, String) => Option[Queue], g
       case Some(queue: Queue) => {
 
         val taskId: Timestamp = message.timestamp.getOrElse(timestampGenerator.nextId)
-        params.optionalParam[Int](TaskPriority) match {
+        val queueItem = params.optionalParam[Int](TaskPriority) match {
           case Some(priority) => {
-            queue.enqueue(taskId, taskToken, priority, message.getData[Any])
-            message.reply(Map(TaskId -> taskId.toString))
+            QueueItem.Task(taskId, taskToken, priority, message.getData[Any])
           }
           case None if queue.priorities.size == 1 => {
             // If no priority is specified and queue has only one priority, default to that priority
-            queue.enqueue(taskId, taskToken, queue.priorities.head.value, message.getData[Any])
-            message.reply(Map(TaskId -> taskId.toString))
+            QueueItem.Task(taskId, taskToken, queue.priorities.head.value, message.getData[Any])
           }
           case None => throw new InvalidParameter("Parameter priority must be specified")
         }
+        queue.enqueue(queueItem)
+        message.reply(Map(TaskId -> taskId.toString))
+
       }
       case None => throw new InvalidParameter(s"No queue '$queueName' for shard $memberToken")
     }
@@ -54,7 +55,7 @@ private[bwl] class QueueResource(getQueue: => (Long, String) => Option[Queue], g
     val ackId: Timestamp = message.timestamp.getOrElse(timestampGenerator.nextId)
 
     getQueue(memberToken, queueName) match {
-      case Some(queue: Queue) => queue.ack(ackId, taskId)
+      case Some(queue: Queue) => queue.ack(QueueItem.Ack(ackId, taskId))
       case None => throw new InvalidParameter(s"No queue '$queueName' for shard $memberToken")
     }
   }
