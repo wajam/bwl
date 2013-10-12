@@ -2,12 +2,11 @@ package com.wajam.bwl.queue.log
 
 import com.wajam.spnl.feeder.Feeder
 import com.wajam.spnl.TaskContext
-import com.wajam.bwl.queue.PrioritySelector
+import com.wajam.bwl.queue.{ QueueDefinition, PrioritySelector }
 import com.wajam.bwl.utils.{ FeederPositionTracker, PeekIterator }
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.bwl.QueueResource._
 import com.wajam.spnl.feeder.Feeder._
-import com.wajam.bwl.queue.QueueDefinition
 
 /**
  * Feeder implementation for the LogQueue persistent queue.
