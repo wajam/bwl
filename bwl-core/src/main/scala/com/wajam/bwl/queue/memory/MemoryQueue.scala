@@ -4,9 +4,11 @@ import com.wajam.bwl.queue._
 import com.wajam.nrv.utils.timestamp.Timestamp
 import java.util.concurrent.ConcurrentLinkedQueue
 import com.wajam.spnl.feeder.Feeder
-import com.wajam.spnl.{ TaskData, TaskContext }
+import com.wajam.spnl.TaskContext
 import com.wajam.bwl.utils.PeekIterator
 import com.wajam.nrv.service.Service
+import com.wajam.spnl.feeder.Feeder._
+import com.wajam.bwl.queue.QueueDefinition
 
 /**
  * Simple memory queue. MUST not be used in production.
@@ -14,13 +16,12 @@ import com.wajam.nrv.service.Service
 class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queue {
 
   private val selector = new PrioritySelector(priorities)
-  private val queues = priorities.map(_.value -> new ConcurrentLinkedQueue[TaskData]).toMap
+  private val queues = priorities.map(_.value -> new ConcurrentLinkedQueue[FeederData]).toMap
 
   private val randomTaskIterator = PeekIterator(Iterator.continually(queues(selector.next).poll()))
 
   def enqueue(taskId: Timestamp, taskToken: Long, taskPriority: Int, taskData: Any) {
-    val data = TaskData(taskToken,
-      Map("token" -> taskToken, "id" -> taskId.value, "priority" -> taskPriority, "data" -> taskData))
+    val data = Map("token" -> taskToken, "id" -> taskId.value, "priority" -> taskPriority, "data" -> taskData)
     queues(taskPriority).offer(data)
   }
 
@@ -49,7 +50,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queu
 
     def next() = Option(randomTaskIterator.next())
 
-    def ack(data: TaskData) {
+    def ack(data: FeederData) {
       // No-op. Memory queues are not persisted.
     }
 
