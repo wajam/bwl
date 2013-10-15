@@ -33,6 +33,7 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
         val request = createSyntheticRequest(taskItem.taskId, taskItem.token, "/enqueue", params, taskItem.data)
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
+        totalTaskCount += 1
       }
       case None => // TODO
     }
@@ -44,6 +45,7 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
         val request = createSyntheticRequest(ackItem.ackId, -1, "/ack")
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
+        totalTaskCount -= 1
       }
       case None => // TODO:
     }
@@ -82,7 +84,7 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
       val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
       val initialTimestamp = startTimestamp.getOrElse(findStartTimestamp(txLog))
 
-      // TODO: rebuild in-memory priority states
+      // Rebuild in-memory states by reading all the persisted tasks from the transaction log once
       val (total, processed) = rebuildPriorityQueueState(priority, initialTimestamp)
       totalTaskCount += total
 
@@ -94,6 +96,11 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
     new DelayedQueueReader(recorder, createLogQueueReader)
   }
 
+  /**
+   * Reads all the persisted tasks from the transaction logs and computes the number of unprocessed tasks
+   * (i.e. excluding acknowledged tasks) and keep a list of processed tasks (i.e. the acknowledged ones).
+   * The processed tasks will be skip when read again from the feeder.
+   */
   private def rebuildPriorityQueueState(priority: Int, initialTimestamp: Timestamp): (Int, mutable.Set[Timestamp]) = {
 
     import com.wajam.commons.Closable.using
