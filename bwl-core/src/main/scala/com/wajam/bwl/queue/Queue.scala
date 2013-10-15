@@ -7,6 +7,7 @@ import com.wajam.nrv.service.Service
 import com.wajam.spnl.TaskContext
 import scala.concurrent.Future
 import com.wajam.spnl.feeder.Feeder.FeederData
+import language.implicitConversions
 
 case class Priority(value: Int, weight: Int)
 
@@ -23,8 +24,6 @@ object QueueItem {
   case class Task(taskId: Timestamp, token: Long, priority: Int, data: Any) extends QueueItem
 
   case class Ack(ackId: Timestamp, taskId: Timestamp) extends QueueItem
-
-  import language.implicitConversions
 
   implicit def item2data(item: QueueItem.Task): FeederData = {
     Map("token" -> item.token, "id" -> item.taskId.value, "priority" -> item.priority, "data" -> item.data)

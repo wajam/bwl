@@ -11,7 +11,6 @@ import com.wajam.bwl.queue.log.LogQueue.RecorderFactory
 import com.wajam.nrv.service.Service
 import com.wajam.nrv.consistency.log.{ TimestampedRecord, FileTransactionLog }
 import com.wajam.nrv.consistency.replication.TransactionLogReplicationIterator
-import scala.collection.mutable
 import com.wajam.bwl.QueueResource._
 import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
@@ -101,7 +100,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
    * (i.e. excluding acknowledged tasks) and keep a list of processed tasks (i.e. the acknowledged ones).
    * The processed tasks will be skip when read again from the feeder.
    */
-  private def rebuildPriorityQueueState(priority: Int, initialTimestamp: Timestamp): (Int, mutable.Set[Timestamp]) = {
+  private def rebuildPriorityQueueState(priority: Int, initialTimestamp: Timestamp): (Int, Set[Timestamp]) = {
 
     import com.wajam.commons.Closable.using
     import LogQueue.message2item
@@ -111,18 +110,22 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
     val member = recorder.member
 
     using(new TransactionLogReplicationIterator(member, initialTimestamp, txLog, Some(Long.MaxValue))) { itr =>
-      val items = for (msgOpt <- itr; msg <- msgOpt; item <- message2item(msg, service)) yield item
+      val items = for {
+        msgOpt <- itr
+        msg <- msgOpt
+        item <- message2item(msg, service)
+      } yield item
 
       // TODO: do not read beyond max timestamp which is the oldest item appended after the queue start
-      var all = mutable.Set[Timestamp]()
-      var processed = mutable.Set[Timestamp]()
+      var all = Set[Timestamp]()
+      var processed = Set[Timestamp]()
       items.foreach {
         case item: QueueItem.Task => all += item.taskId
-        case item: QueueItem.Ack => {
-          if (all.remove(item.taskId)) {
-            processed += item.taskId
-          }
+        case item: QueueItem.Ack if all.contains(item.taskId) => {
+          all -= item.taskId
+          processed += item.taskId
         }
+        case _ => // Ignore other items. They are either ack for tasks prior the initial timestamp or responses
       }
 
       (all.size, processed)
