@@ -1,6 +1,6 @@
 package com.wajam.bwl.queue.log
 
-import com.wajam.bwl.queue.{ QueueService, Queue }
+import com.wajam.bwl.queue._
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.nrv.data._
 import com.wajam.nrv.data.MValue._
@@ -11,7 +11,6 @@ import com.wajam.bwl.queue.log.LogQueue.RecorderFactory
 import com.wajam.nrv.service.Service
 import com.wajam.nrv.consistency.log.{ TimestampedRecord, FileTransactionLog }
 import com.wajam.nrv.consistency.replication.TransactionLogReplicationIterator
-import scala.collection.mutable
 import com.wajam.bwl.QueueResource._
 import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
@@ -19,36 +18,41 @@ import com.wajam.bwl.queue.QueueDefinition
 /**
  * Persistent queue using NRV transaction log as backing storage. Each priority is appended to separate log.
  */
-class LogQueue(val token: Long, service: Service with QueueService, val definition: QueueDefinition,
+class LogQueue(val token: Long, service: Service, val definition: QueueDefinition,
                recorderFactory: RecorderFactory) extends Queue {
 
-  val recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
-  val reloadedAck: mutable.Set[Timestamp] = mutable.Set()
+  private val recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
 
-  def enqueue(taskId: Timestamp, taskToken: Long, taskPriority: Int, taskData: Any) {
-    recorders.get(taskPriority) match {
+  private var totalTaskCount = 0
+
+  def enqueue(taskItem: QueueItem.Task) {
+    recorders.get(taskItem.priority) match {
       case Some(recorder) => {
-        val params = Iterable[(String, MValue)](TaskPriority -> taskPriority)
-        val request = createSyntheticRequest(taskId, taskToken, "/enqueue", params, taskData)
+        val params = Iterable[(String, MValue)](TaskPriority -> taskItem.priority)
+        val request = createSyntheticRequest(taskItem.taskId, taskItem.token, "/enqueue", params, taskItem.data)
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
+        totalTaskCount += 1
       }
       case None => // TODO
     }
   }
 
-  def ack(ackId: Timestamp, taskId: Timestamp) {
-    feeder.pendingTaskPriorityFor(taskId).flatMap(priority => recorders.get(priority)) match {
+  def ack(ackItem: QueueItem.Ack) {
+    feeder.pendingTaskPriorityFor(ackItem.taskId).flatMap(priority => recorders.get(priority)) match {
       case Some(recorder) => {
-        val request = createSyntheticRequest(ackId, -1, "/ack")
+        val request = createSyntheticRequest(ackItem.ackId, -1, "/ack")
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
+        totalTaskCount -= 1
       }
       case None => // TODO:
     }
   }
 
   val feeder = new LogQueueFeeder(definition, createPriorityQueueReader)
+
+  def stats: QueueStats = LogQueueStats
 
   private def createSyntheticRequest(taskId: Timestamp, taskToken: Long, path: String,
                                      params: Iterable[(String, MValue)] = Nil, data: Any = null): InMessage = {
@@ -76,14 +80,56 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
     val recorder = recorders(priority)
 
     def createLogQueueReader: LogQueueReader = {
-      // TODO: rebuild in-memory priority states including 'reloadedAck'
       val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
+      val initialTimestamp = startTimestamp.getOrElse(findStartTimestamp(txLog))
+
+      // Rebuild in-memory states by reading all the persisted tasks from the transaction log once
+      val (total, processed) = rebuildPriorityQueueState(priority, initialTimestamp)
+      totalTaskCount += total
+
       val itr = new TransactionLogReplicationIterator(recorder.member,
-        startTimestamp.getOrElse(findStartTimestamp(txLog)), txLog, recorder.currentConsistentTimestamp)
-      LogQueueReader(service, itr, reloadedAck)
+        initialTimestamp, txLog, recorder.currentConsistentTimestamp)
+      LogQueueReader(service, itr, processed)
     }
 
     new DelayedQueueReader(recorder, createLogQueueReader)
+  }
+
+  /**
+   * Reads all the persisted tasks from the transaction logs and computes the number of unprocessed tasks
+   * (i.e. excluding acknowledged tasks) and keep a list of processed tasks (i.e. the acknowledged ones).
+   * The processed tasks will be skip when read again from the feeder.
+   */
+  private def rebuildPriorityQueueState(priority: Int, initialTimestamp: Timestamp): (Int, Set[Timestamp]) = {
+
+    import com.wajam.commons.Closable.using
+    import LogQueue.message2item
+
+    val recorder = recorders(priority)
+    val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
+    val member = recorder.member
+
+    using(new TransactionLogReplicationIterator(member, initialTimestamp, txLog, Some(Long.MaxValue))) { itr =>
+      val items = for {
+        msgOpt <- itr
+        msg <- msgOpt
+        item <- message2item(msg, service)
+      } yield item
+
+      // TODO: do not read beyond max timestamp which is the oldest item appended after the queue start
+      var all = Set[Timestamp]()
+      var processed = Set[Timestamp]()
+      items.foreach {
+        case item: QueueItem.Task => all += item.taskId
+        case item: QueueItem.Ack if all.contains(item.taskId) => {
+          all -= item.taskId
+          processed += item.taskId
+        }
+        case _ => // Ignore other items. They are either ack for tasks prior the initial timestamp or responses
+      }
+
+      (all.size, processed)
+    }
   }
 
   /**
@@ -136,7 +182,7 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
       reader.foreach(_.close())
     }
 
-    def delayedEntries = getOrCreateReader.delayedEntries
+    def delayedTasks = getOrCreateReader.delayedTasks
   }
 
   private object InfiniteEmptyReader extends LogQueueReader {
@@ -146,7 +192,15 @@ class LogQueue(val token: Long, service: Service with QueueService, val definiti
 
     def close() {}
 
-    def delayedEntries = Nil
+    def delayedTasks = Nil
+  }
+
+  private object LogQueueStats extends QueueStats {
+    def totalTasks = totalTaskCount
+
+    def pendingTasks = feeder.pendingTasks.toIterable
+
+    def delayedTasks = feeder.delayedTasks.toIterable
   }
 
 }
@@ -159,7 +213,7 @@ object LogQueue {
    * Creates a new LogQueue. This factory method is usable as [[com.wajam.bwl.queue.Queue.QueueFactory]] with the
    * Bwl service
    */
-  def create(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000)(token: Long, definition: QueueDefinition, service: Service with QueueService): Queue = {
+  def create(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000)(token: Long, definition: QueueDefinition, service: Service): Queue = {
 
     val logDir = Paths.get(dataDir.getCanonicalPath, service.name, "queues")
     def consistencyDelay: Long = {
@@ -179,5 +233,17 @@ object LogQueue {
     }
 
     new LogQueue(token, service, definition, createRecorder)
+  }
+
+  def message2item(message: Message, service: Service): Option[QueueItem] = {
+    import com.wajam.nrv.extension.resource.ParamsAccessor._
+
+    message.function match {
+      case MessageType.FUNCTION_CALL if message.path == "/enqueue" => {
+        message.timestamp.map(QueueItem.Task(_, message.token, message.param[Int](TaskPriority), message.getData[Any]))
+      }
+      case MessageType.FUNCTION_CALL if message.path == "/ack" => message.timestamp.map(QueueItem.Ack(_, message.param[Long](TaskId)))
+      case _ => None
+    }
   }
 }
