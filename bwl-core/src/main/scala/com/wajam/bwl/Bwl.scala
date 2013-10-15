@@ -13,7 +13,7 @@ import com.wajam.commons.Logging
 
 class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQueue: QueueFactory,
           spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)
-    extends Service(name) with QueueService with Logging {
+    extends Service(name) with Logging {
 
   private case class QueueWrapper(queue: Queue, task: Task) {
     def start() {

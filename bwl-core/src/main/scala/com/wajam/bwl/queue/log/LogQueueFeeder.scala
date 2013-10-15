@@ -1,6 +1,8 @@
 package com.wajam.bwl.queue.log
 
 import com.wajam.spnl.feeder.Feeder
+import com.wajam.bwl.queue.QueueItem
+import scala.collection.immutable.TreeMap
 import com.wajam.spnl.TaskContext
 import com.wajam.bwl.queue.{ QueueDefinition, PrioritySelector }
 import com.wajam.bwl.utils.{ FeederPositionTracker, PeekIterator }
@@ -16,14 +18,11 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
 
   private val selector = new PrioritySelector(definition.priorities)
   private var readers: Map[Int, LogQueueReader] = Map()
-  private var randomTaskIterator: PeekIterator[Option[QueueEntry.Task]] = PeekIterator(Iterator())
+  private var randomTaskIterator: PeekIterator[Option[QueueItem.Task]] = PeekIterator(Iterator())
 
-  // Keep track of non-acknowledged entries and oldest entry per priority
+  // Keep track of non-acknowledged task and oldest task per priority
   private var trackers: Map[Int, FeederPositionTracker[Timestamp]] = Map()
-
-  implicit def entry2data(entry: Option[QueueEntry.Task]): Option[FeederData] = {
-    entry.map(d => Map("token" -> d.token, "id" -> d.id.value, "priority" -> d.priority, "data" -> d.data))
-  }
+  private var pendingItems: Map[Timestamp, QueueItem.Task] = TreeMap()
 
   private var taskContext: TaskContext = null
 
@@ -45,7 +44,9 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
     randomTaskIterator = PeekIterator(Iterator.continually(readers(selector.next).next()))
   }
 
-  def peek() = {
+  def peek(): Option[FeederData] = {
+    import QueueItem.item2data
+
     if (randomTaskIterator.nonEmpty) {
       randomTaskIterator.peek match {
         case None => {
@@ -53,18 +54,21 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
           randomTaskIterator.next()
           None
         }
-        case data => data
+        case Some(item) => Some(item2data(item))
       }
     } else {
       None
     }
   }
 
-  def next() = {
+  def next(): Option[FeederData] = {
+    import QueueItem.item2data
+
     randomTaskIterator.next() match {
-      case Some(entry) => {
-        trackers(entry.priority) += entry.id
-        entry2data(Some(entry))
+      case Some(item) => {
+        trackers(item.priority) += item.taskId
+        pendingItems += item.taskId -> item
+        Some(item2data(item))
       }
       case None => None
     }
@@ -74,10 +78,11 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
     val priority = data(TaskPriority).toString.toInt
     val taskId = data(TaskId).toString.toLong
     trackers(priority) -= taskId
+    pendingItems -= taskId
 
     // Update task context with oldest processed or delayed item for the acknowledged item priority
     val oldestPendingTaskId = trackers(priority).oldestItemId
-    val oldestDelayedTaskId = readers(priority).delayedEntries.headOption.map(_.id)
+    val oldestDelayedTaskId = readers(priority).delayedTasks.headOption.map(_.taskId)
     val position: Option[Timestamp] = (oldestPendingTaskId, oldestDelayedTaskId) match {
       case (Some(pending), Some(delayed)) => Some(math.min(pending.value, delayed.value))
       case (id @ Some(_), None) => id
@@ -91,7 +96,9 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
     readers.valuesIterator.foreach(_.close())
   }
 
-  def pendingTaskPriorityFor(taskId: Timestamp): Option[Int] = trackers.collectFirst {
-    case (priority, pendingIds) if pendingIds.contains(taskId) => priority
-  }
+  def pendingTaskPriorityFor(taskId: Timestamp): Option[Int] = pendingItems.get(taskId).map(_.priority)
+
+  def pendingTasks: Iterator[QueueItem.Task] = pendingItems.valuesIterator
+
+  def delayedTasks: Iterator[QueueItem.Task] = readers.valuesIterator.flatMap(_.delayedTasks)
 }

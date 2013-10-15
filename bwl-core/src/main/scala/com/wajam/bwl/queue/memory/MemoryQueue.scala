@@ -1,12 +1,14 @@
 package com.wajam.bwl.queue.memory
 
 import com.wajam.bwl.queue._
-import com.wajam.nrv.utils.timestamp.Timestamp
 import java.util.concurrent.ConcurrentLinkedQueue
 import com.wajam.spnl.feeder.Feeder
 import com.wajam.spnl.TaskContext
 import com.wajam.bwl.utils.PeekIterator
 import com.wajam.nrv.service.Service
+import com.wajam.nrv.utils.timestamp.Timestamp
+import com.wajam.bwl.QueueResource._
+import scala.collection.immutable.TreeMap
 import com.wajam.spnl.feeder.Feeder._
 import com.wajam.bwl.queue.QueueDefinition
 
@@ -16,16 +18,16 @@ import com.wajam.bwl.queue.QueueDefinition
 class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queue {
 
   private val selector = new PrioritySelector(priorities)
-  private val queues = priorities.map(_.value -> new ConcurrentLinkedQueue[FeederData]).toMap
+  private val queues = priorities.map(_.value -> new ConcurrentLinkedQueue[QueueItem.Task]).toMap
+  private var pendingTasks: Map[Timestamp, QueueItem.Task] = TreeMap()
 
   private val randomTaskIterator = PeekIterator(Iterator.continually(queues(selector.next).poll()))
 
-  def enqueue(taskId: Timestamp, taskToken: Long, taskPriority: Int, taskData: Any) {
-    val data = Map("token" -> taskToken, "id" -> taskId.value, "priority" -> taskPriority, "data" -> taskData)
-    queues(taskPriority).offer(data)
+  def enqueue(taskItem: QueueItem.Task) {
+    queues(taskItem.priority).offer(taskItem)
   }
 
-  def ack(ackId: Timestamp, taskId: Timestamp) {
+  def ack(ackItem: QueueItem.Ack) {
     // No-op. Memory queues are not persisted.
   }
 
@@ -37,33 +39,57 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queu
       // No-op. Memory queues are not persisted.
     }
 
-    def peek() = {
+    def peek(): Option[FeederData] = {
+      import QueueItem.item2data
+
       randomTaskIterator.peek match {
         case null => {
           // Peek returned nothing, must skip it or will always be null
           randomTaskIterator.next()
           None
         }
-        case data => Some(data)
+        case item => Some(item2data(item))
       }
     }
 
-    def next() = Option(randomTaskIterator.next())
+    def next(): Option[FeederData] = {
+      import QueueItem.item2data
+
+      randomTaskIterator.next() match {
+        case null => None
+        case item => {
+          pendingTasks += item.taskId -> item
+          Some(item2data(item))
+        }
+      }
+    }
 
     def ack(data: FeederData) {
-      // No-op. Memory queues are not persisted.
+      val taskId = data(TaskId).toString.toLong
+      pendingTasks -= taskId
     }
 
     def kill() {}
   }
 
+  def stats: QueueStats = MemoryQueueStats
+
   def start() {}
 
   def stop() {}
+
+  private object MemoryQueueStats extends QueueStats {
+    def totalTasks = queues.valuesIterator.map(_.size()).sum
+
+    def pendingTasks = MemoryQueue.this.pendingTasks.valuesIterator.toIterable
+
+    // TODO: support delayed tasks
+    def delayedTasks = Nil
+  }
 }
 
 object MemoryQueue {
-  def create(token: Long, definition: QueueDefinition, service: Service with QueueService): Queue = {
+  def create(token: Long, definition: QueueDefinition, service: Service): Queue = {
     new MemoryQueue(token, definition)
   }
 }
