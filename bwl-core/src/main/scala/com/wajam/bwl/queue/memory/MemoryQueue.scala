@@ -89,7 +89,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queu
 }
 
 object MemoryQueue {
-  def create(token: Long, definition: QueueDefinition, service: Service with QueueService): Queue = {
+  def create(token: Long, definition: QueueDefinition, service: Service): Queue = {
     new MemoryQueue(token, definition)
   }
 }

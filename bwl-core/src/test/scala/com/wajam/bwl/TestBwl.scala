@@ -82,7 +82,7 @@ trait BwlFixture extends MockitoSugar {
 object BwlFixture {
 
   trait QueueFactory {
-    type Factory = (Long, QueueDefinition, Service with QueueService) => Queue
+    type Factory = (Long, QueueDefinition, Service) => Queue
 
     def name: String
 

@@ -3,7 +3,7 @@ package com.wajam.bwl.queue.log
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.nrv.data.Message
 import scala.collection.mutable
-import com.wajam.bwl.queue.{ QueueItem, QueueService }
+import com.wajam.bwl.queue.QueueItem
 import com.wajam.nrv.service.Service
 import com.wajam.commons.Closable
 
@@ -22,7 +22,7 @@ object LogQueueReader {
    * Creates a reader which returns only unprocessed tasks. Tasks present in the `processed` set are skip and the set updated.
    * This set is initialized by reading the logs to the end before creating this reader.
    */
-  def apply(service: QueueService with Service, itr: Iterator[Option[Message]] with Closable,
+  def apply(service: Service, itr: Iterator[Option[Message]] with Closable,
             processed: mutable.Set[Timestamp]): LogQueueReader = {
     new LogQueueReader {
 

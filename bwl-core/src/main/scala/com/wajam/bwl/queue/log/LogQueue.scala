@@ -19,7 +19,7 @@ import com.wajam.bwl.queue.QueueDefinition
 /**
  * Persistent queue using NRV transaction log as backing storage. Each priority is appended to separate log.
  */
-class LogQueue(val token: Long, service: Service with QueueService, val definition: QueueDefinition,
+class LogQueue(val token: Long, service: Service, val definition: QueueDefinition,
                recorderFactory: RecorderFactory) extends Queue {
 
   private val recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
@@ -210,7 +210,7 @@ object LogQueue {
    * Creates a new LogQueue. This factory method is usable as [[com.wajam.bwl.queue.Queue.QueueFactory]] with the
    * Bwl service
    */
-  def create(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000)(token: Long, definition: QueueDefinition, service: Service with QueueService): Queue = {
+  def create(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000)(token: Long, definition: QueueDefinition, service: Service): Queue = {
 
     val logDir = Paths.get(dataDir.getCanonicalPath, service.name, "queues")
     def consistencyDelay: Long = {
@@ -232,7 +232,7 @@ object LogQueue {
     new LogQueue(token, service, definition, createRecorder)
   }
 
-  def message2item(message: Message, service: QueueService with Service): Option[QueueItem] = {
+  def message2item(message: Message, service: Service): Option[QueueItem] = {
     import com.wajam.nrv.extension.resource.ParamsAccessor._
 
     message.function match {

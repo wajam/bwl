@@ -8,11 +8,6 @@ import com.wajam.spnl.TaskContext
 import scala.concurrent.Future
 import com.wajam.spnl.feeder.Feeder.FeederData
 
-// TODO: keep this???
-trait QueueService {
-  this: Service =>
-}
-
 case class Priority(value: Int, weight: Int)
 
 class PrioritySelector(priorities: Iterable[Priority])
@@ -72,7 +67,7 @@ trait Queue {
 }
 
 object Queue {
-  type QueueFactory = (Long, QueueDefinition, Service with QueueService) => Queue
+  type QueueFactory = (Long, QueueDefinition, Service) => Queue
 }
 
 object QueueTask {
