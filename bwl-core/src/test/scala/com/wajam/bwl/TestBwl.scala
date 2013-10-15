@@ -157,7 +157,7 @@ class TestBwl extends FunSuite {
       new BwlFixture with MultipleQueueFixture {}.runWithFixture((f) => {
         val enqueued = f.definition.priorities.flatMap(p => 1.to(200).map(i =>
           f.bwl.enqueue(i, f.definition.name, Map("p" -> p.value, "i" -> i), Some(p.value))))
-        Await.result(Future.sequence(enqueued), 5 seconds)
+        Await.result(Future.sequence(enqueued), 5.seconds)
 
         val dataCaptor = ArgumentCaptor.forClass(classOf[Map[String, Any]])
         verify(f.mockCallback, timeout(5000).atLeast(100)).process(dataCaptor.capture())

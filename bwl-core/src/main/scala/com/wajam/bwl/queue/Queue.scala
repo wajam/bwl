@@ -29,6 +29,8 @@ object QueueItem {
 
   case class Ack(ackId: Timestamp, taskId: Timestamp) extends QueueItem
 
+  import language.implicitConversions
+
   implicit def item2data(item: QueueItem.Task): FeederData = {
     Map("token" -> item.token, "id" -> item.taskId.value, "priority" -> item.priority, "data" -> item.data)
   }

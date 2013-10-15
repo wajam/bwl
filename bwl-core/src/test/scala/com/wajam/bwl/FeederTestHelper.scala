@@ -3,6 +3,7 @@ package com.wajam.bwl
 import com.wajam.spnl.feeder.Feeder
 import com.wajam.commons.Closable
 import com.wajam.spnl.feeder.Feeder.FeederData
+import language.implicitConversions
 
 // TODO: Add in SPNL. This is a copy of a class also present in MRY
 object FeederTestHelper {
