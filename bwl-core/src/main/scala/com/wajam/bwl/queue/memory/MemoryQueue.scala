@@ -40,26 +40,22 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queu
     }
 
     def peek(): Option[FeederData] = {
-      import QueueItem.item2data
-
       randomTaskIterator.peek match {
         case null => {
           // Peek returned nothing, must skip it or will always be null
           randomTaskIterator.next()
           None
         }
-        case item => Some(item2data(item))
+        case item => Some(item.toFeederData)
       }
     }
 
     def next(): Option[FeederData] = {
-      import QueueItem.item2data
-
       randomTaskIterator.next() match {
         case null => None
         case item => {
           pendingTasks += item.taskId -> item
-          Some(item2data(item))
+          Some(item.toFeederData)
         }
       }
     }

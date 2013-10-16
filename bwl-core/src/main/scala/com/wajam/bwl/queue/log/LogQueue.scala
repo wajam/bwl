@@ -7,13 +7,13 @@ import com.wajam.nrv.data.MValue._
 import java.io.File
 import java.nio.file.{ Files, Paths }
 import com.wajam.nrv.consistency.{ ConsistencyMasterSlave, ResolvedServiceMember, TransactionRecorder }
-import com.wajam.bwl.queue.log.LogQueue.RecorderFactory
 import com.wajam.nrv.service.Service
 import com.wajam.nrv.consistency.log.{ TimestampedRecord, FileTransactionLog }
 import com.wajam.nrv.consistency.replication.TransactionLogReplicationIterator
 import com.wajam.bwl.QueueResource._
 import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
+import LogQueue._
 
 /**
  * Persistent queue using NRV transaction log as backing storage. Each priority is appended to separate log.
@@ -28,8 +28,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   def enqueue(taskItem: QueueItem.Task) {
     recorders.get(taskItem.priority) match {
       case Some(recorder) => {
-        val params = Iterable[(String, MValue)](TaskPriority -> taskItem.priority)
-        val request = createSyntheticRequest(taskItem.taskId, taskItem.token, "/enqueue", params, taskItem.data)
+        val request = item2request(taskItem)
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
         totalTaskCount += 1
@@ -41,7 +40,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   def ack(ackItem: QueueItem.Ack) {
     feeder.pendingTaskPriorityFor(ackItem.taskId).flatMap(priority => recorders.get(priority)) match {
       case Some(recorder) => {
-        val request = createSyntheticRequest(ackItem.ackId, -1, "/ack")
+        val request = item2request(ackItem)
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
         totalTaskCount -= 1
@@ -53,24 +52,6 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   val feeder = new LogQueueFeeder(definition, createPriorityQueueReader)
 
   def stats: QueueStats = LogQueueStats
-
-  private def createSyntheticRequest(taskId: Timestamp, taskToken: Long, path: String,
-                                     params: Iterable[(String, MValue)] = Nil, data: Any = null): InMessage = {
-    val extraParams = Iterable[(String, MValue)](TaskId -> taskId.value, TaskToken -> taskToken)
-    val request = new InMessage(params ++ extraParams, data = data)
-    request.token = taskToken
-    request.timestamp = Some(taskId)
-    request.function = MessageType.FUNCTION_CALL
-    request.path = path
-    request
-  }
-
-  private def createSyntheticSuccessResponse(request: InMessage): OutMessage = {
-    val response = new OutMessage(code = 200)
-    request.copyTo(response)
-    response.function = MessageType.FUNCTION_RESPONSE
-    response
-  }
 
   /**
    * Creates a new LogQueueFeeder.QueueReader. This method is passed as a factory function to the
@@ -103,7 +84,6 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   private def rebuildPriorityQueueState(priority: Int, initialTimestamp: Timestamp): (Int, Set[Timestamp]) = {
 
     import com.wajam.commons.Closable.using
-    import LogQueue.message2item
 
     val recorder = recorders(priority)
     val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
@@ -235,7 +215,7 @@ object LogQueue {
     new LogQueue(token, service, definition, createRecorder)
   }
 
-  def message2item(message: Message, service: Service): Option[QueueItem] = {
+  private[log] def message2item(message: Message, service: Service): Option[QueueItem] = {
     import com.wajam.nrv.extension.resource.ParamsAccessor._
 
     message.function match {
@@ -243,7 +223,35 @@ object LogQueue {
         message.timestamp.map(QueueItem.Task(_, message.token, message.param[Int](TaskPriority), message.getData[Any]))
       }
       case MessageType.FUNCTION_CALL if message.path == "/ack" => message.timestamp.map(QueueItem.Ack(_, message.param[Long](TaskId)))
-      case _ => None
+      case _ => throw new IllegalStateException(s"Unsupported message path: ${message.path}")
     }
+  }
+
+  private[log] def item2request(item: QueueItem): InMessage = {
+    item match {
+      case taskItem: QueueItem.Task => {
+        val params = Iterable[(String, MValue)](TaskPriority -> taskItem.priority)
+        createSyntheticRequest(taskItem.taskId, taskItem.token, "/enqueue", params, taskItem.data)
+      }
+      case ackItem: QueueItem.Ack => createSyntheticRequest(ackItem.ackId, -1, "/ack")
+    }
+  }
+
+  private[log] def createSyntheticRequest(taskId: Timestamp, taskToken: Long, path: String,
+                                          params: Iterable[(String, MValue)] = Nil, data: Any = null): InMessage = {
+    val extraParams = Iterable[(String, MValue)](TaskId -> taskId.value, TaskToken -> taskToken)
+    val request = new InMessage(params ++ extraParams, data = data)
+    request.token = taskToken
+    request.timestamp = Some(taskId)
+    request.function = MessageType.FUNCTION_CALL
+    request.path = path
+    request
+  }
+
+  private[log] def createSyntheticSuccessResponse(request: InMessage): OutMessage = {
+    val response = new OutMessage(code = 200)
+    request.copyTo(response)
+    response.function = MessageType.FUNCTION_RESPONSE
+    response
   }
 }

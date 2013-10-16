@@ -9,11 +9,12 @@ import com.wajam.bwl.utils.{ FeederPositionTracker, PeekIterator }
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.bwl.QueueResource._
 import com.wajam.spnl.feeder.Feeder._
+import scala.util.Random
 
 /**
  * Feeder implementation for the LogQueue persistent queue.
  */
-class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Option[Timestamp]) => LogQueueReader)
+class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Option[Timestamp]) => LogQueueReader)(implicit random: Random = Random)
     extends Feeder {
 
   private val selector = new PrioritySelector(definition.priorities)
@@ -45,8 +46,6 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
   }
 
   def peek(): Option[FeederData] = {
-    import QueueItem.item2data
-
     if (randomTaskIterator.nonEmpty) {
       randomTaskIterator.peek match {
         case None => {
@@ -54,7 +53,7 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
           randomTaskIterator.next()
           None
         }
-        case Some(item) => Some(item2data(item))
+        case Some(item) => Some(item.toFeederData)
       }
     } else {
       None
@@ -62,13 +61,11 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
   }
 
   def next(): Option[FeederData] = {
-    import QueueItem.item2data
-
     randomTaskIterator.next() match {
       case Some(item) => {
         trackers(item.priority) += item.taskId
         pendingItems += item.taskId -> item
-        Some(item2data(item))
+        Some(item.toFeederData)
       }
       case None => None
     }
@@ -89,7 +86,7 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
       case (None, id @ Some(_)) => id
       case (None, None) => None
     }
-    position.foreach(taskContext.data += priority.toString -> _)
+    position.foreach(taskContext.data += priority.toString -> _.value)
   }
 
   def kill() {
