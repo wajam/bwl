@@ -23,13 +23,12 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queu
 
   private val randomTaskIterator = PeekIterator(Iterator.continually(queues(selector.next).poll()))
 
-  def enqueue(taskItem: QueueItem.Task) {
+  def enqueue(taskItem: QueueItem.Task) = {
     queues(taskItem.priority).offer(taskItem)
+    taskItem
   }
 
-  def ack(ackItem: QueueItem.Ack) {
-    // No-op. Memory queues are not persisted.
-  }
+  def ack(ackItem: QueueItem.Ack) = ackItem
 
   lazy val feeder = new Feeder {
 

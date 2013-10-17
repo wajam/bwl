@@ -22,6 +22,7 @@ import com.wajam.nrv.service.Service
 import com.wajam.bwl.queue.log.LogQueue
 import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
+import org.apache.commons.io.FileUtils
 
 trait BwlFixture extends MockitoSugar {
 
@@ -110,8 +111,7 @@ object BwlFixture {
     }
 
     override def after() = {
-      logDir.listFiles().foreach(_.delete())
-      logDir.delete()
+      FileUtils.deleteDirectory(logDir)
       logDir = null
     }
   }

@@ -13,6 +13,7 @@ import com.wajam.nrv.consistency.replication.TransactionLogReplicationIterator
 import com.wajam.bwl.QueueResource._
 import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
+import java.util.concurrent.atomic.AtomicInteger
 import LogQueue._
 
 /**
@@ -22,31 +23,49 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
                recorderFactory: RecorderFactory) extends Queue {
 
   private val recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
+  private var rebuildEndPositions: Map[Int, Timestamp] = recorders.collect {
+    case (priority, recorder) if recorder.currentConsistentTimestamp.isDefined => priority -> recorder.currentConsistentTimestamp.get
+  }.toMap
 
-  private var totalTaskCount = 0
+  private val totalTaskCount = new AtomicInteger()
 
-  def enqueue(taskItem: QueueItem.Task) {
+  def enqueue(taskItem: QueueItem.Task) = {
     recorders.get(taskItem.priority) match {
       case Some(recorder) => {
         val request = item2request(taskItem)
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
-        totalTaskCount += 1
+
+        // TODO: Explain WTF is this!!!
+        val minIncrementId = synchronized {
+          rebuildEndPositions.get(taskItem.priority) match {
+            case Some(id) => id
+            case None => {
+              rebuildEndPositions += taskItem.priority -> taskItem.taskId
+              taskItem.taskId
+            }
+          }
+        }
+        if (taskItem.taskId > minIncrementId) {
+          totalTaskCount.incrementAndGet()
+        }
       }
       case None => // TODO
     }
+    taskItem
   }
 
-  def ack(ackItem: QueueItem.Ack) {
+  def ack(ackItem: QueueItem.Ack) = {
     feeder.pendingTaskPriorityFor(ackItem.taskId).flatMap(priority => recorders.get(priority)) match {
       case Some(recorder) => {
         val request = item2request(ackItem)
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
-        totalTaskCount -= 1
+        totalTaskCount.decrementAndGet()
       }
       case None => // TODO:
     }
+    ackItem
   }
 
   val feeder = new LogQueueFeeder(definition, createPriorityQueueReader)
@@ -66,7 +85,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
 
       // Rebuild in-memory states by reading all the persisted tasks from the transaction log once
       val (total, processed) = rebuildPriorityQueueState(priority, initialTimestamp)
-      totalTaskCount += total
+      totalTaskCount.addAndGet(total)
 
       val itr = new TransactionLogReplicationIterator(recorder.member,
         initialTimestamp, txLog, recorder.currentConsistentTimestamp)
@@ -88,24 +107,34 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
     val recorder = recorders(priority)
     val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
     val member = recorder.member
+    val endTimestamp = synchronized(rebuildEndPositions(priority))
 
-    using(new TransactionLogReplicationIterator(member, initialTimestamp, txLog, Some(Long.MaxValue))) { itr =>
+    using(new TransactionLogReplicationIterator(member, initialTimestamp, txLog, recorder.currentConsistentTimestamp)) { itr =>
       val items = for {
         msgOpt <- itr
         msg <- msgOpt
         item <- message2item(msg, service)
       } yield item
 
-      // TODO: do not read beyond max timestamp which is the oldest item appended after the queue start
       var all = Set[Timestamp]()
       var processed = Set[Timestamp]()
-      items.foreach {
-        case item: QueueItem.Task => all += item.taskId
-        case item: QueueItem.Ack if all.contains(item.taskId) => {
-          all -= item.taskId
-          processed += item.taskId
+
+      import scala.util.control.Breaks._
+      breakable {
+        items.takeWhile(_.timestamp <= endTimestamp).foreach { item =>
+          item match {
+            case taskItem: QueueItem.Task => all += taskItem.taskId
+            case ackItem: QueueItem.Ack if all.contains(ackItem.taskId) => {
+              all -= ackItem.taskId
+              processed += ackItem.taskId
+            }
+            case _ => // Ignore other items. They are either ack for tasks prior the initial timestamp or responses
+          }
+
+          if (item.timestamp == endTimestamp) {
+            break()
+          }
         }
-        case _ => // Ignore other items. They are either ack for tasks prior the initial timestamp or responses
       }
 
       (all.size, processed)
@@ -176,7 +205,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   }
 
   private object LogQueueStats extends QueueStats {
-    def totalTasks = totalTaskCount
+    def totalTasks = totalTaskCount.get()
 
     def pendingTasks = feeder.pendingTasks.toIterable
 

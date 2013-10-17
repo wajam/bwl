@@ -18,17 +18,23 @@ class PrioritySelector(priorities: Iterable[Priority])(implicit random: Random =
 case class QueueDefinition(name: String, callback: QueueTask.Callback, taskContext: TaskContext = new TaskContext,
                            priorities: Iterable[Priority] = Seq(Priority(1, weight = 1)))
 
-sealed trait QueueItem
+sealed trait QueueItem {
+  def timestamp: Timestamp
+}
 
 object QueueItem {
 
   case class Task(taskId: Timestamp, token: Long, priority: Int, data: Any) extends QueueItem {
+    def timestamp = taskId
+
     def toFeederData: FeederData = {
       Map("token" -> token, "id" -> taskId.value, "priority" -> priority, "data" -> data)
     }
   }
 
-  case class Ack(ackId: Timestamp, taskId: Timestamp) extends QueueItem
+  case class Ack(ackId: Timestamp, taskId: Timestamp) extends QueueItem {
+    def timestamp = ackId
+  }
 
   implicit val TaskOrdering = new Ordering[QueueItem.Task] {
     def compare(x: QueueItem.Task, y: QueueItem.Task) = x.taskId.compareTo(y.taskId)
@@ -53,9 +59,9 @@ trait Queue {
 
   def priorities: Iterable[Priority] = definition.priorities
 
-  def enqueue(taskItem: QueueItem.Task)
+  def enqueue(taskItem: QueueItem.Task): QueueItem.Task
 
-  def ack(ackItem: QueueItem.Ack)
+  def ack(ackItem: QueueItem.Ack): QueueItem.Ack
 
   def feeder: Feeder
 

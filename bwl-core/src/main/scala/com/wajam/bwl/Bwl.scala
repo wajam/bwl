@@ -97,10 +97,12 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
     val response = definition.callback(data.values("data"))
     response.onSuccess {
       case Result.Ok => {
+        // TODO: ignore result if elapse time > task timeout
         ack(taskToken, definition.name, taskId)
         request.ok()
       }
       case Result.Fail(error, ignore) if ignore => {
+        // TODO: ignore result if elapse time > task timeout
         ack(taskToken, definition.name, taskId)
         request.ignore(error)
       }

@@ -61,13 +61,17 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
   }
 
   def next(): Option[FeederData] = {
-    randomTaskIterator.next() match {
-      case Some(item) => {
-        trackers(item.priority) += item.taskId
-        pendingItems += item.taskId -> item
-        Some(item.toFeederData)
+    if (randomTaskIterator.nonEmpty) {
+      randomTaskIterator.next() match {
+        case Some(item) => {
+          trackers(item.priority) += item.taskId
+          pendingItems += item.taskId -> item
+          Some(item.toFeederData)
+        }
+        case None => None
       }
-      case None => None
+    } else {
+      None
     }
   }
 
