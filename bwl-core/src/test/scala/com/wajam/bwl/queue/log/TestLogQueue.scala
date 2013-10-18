@@ -96,7 +96,7 @@ class TestLogQueue extends FlatSpec {
 
   implicit def stats2like(stats: QueueStats): QueueStatsLike = new QueueStatsLike(stats)
 
-  "Queue" should "enqueue and ack tasks" in new QueueService {
+  "Queue" should "enqueue and produce tasks" in new QueueService {
     withQueueFactory(createQueue => {
       val queue = createQueue()
 

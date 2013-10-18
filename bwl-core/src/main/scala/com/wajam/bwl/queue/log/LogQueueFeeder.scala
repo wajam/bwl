@@ -101,5 +101,6 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
 
   def pendingTasks: Iterator[QueueItem.Task] = pendingItems.valuesIterator
 
+  // TODO: Should delayed tasks be sorted by id or we don't really care?
   def delayedTasks: Iterator[QueueItem.Task] = readers.valuesIterator.flatMap(_.delayedTasks)
 }

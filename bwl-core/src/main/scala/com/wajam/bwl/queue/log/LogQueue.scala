@@ -24,6 +24,12 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
                recorderFactory: RecorderFactory)(implicit random: Random = Random) extends Queue {
 
   private val recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
+
+  // Must not read tasks from logs beyond this position when rebuilding the initial state (rebuild is lazy and per priority),
+  // By default the max rebuild position is the last item present in the log at the time the queue is created.
+  // The state is also updated as new task are enqueued. The max rebuild position ensure that tasks enqueued before the
+  // state is rebuilt are not computed twice. If the queue is empty and has no log, the max rebuild position is
+  // initialized later at the first enqueued task.
   private var rebuildEndPositions: Map[Int, Timestamp] = recorders.collect {
     case (priority, recorder) if recorder.currentConsistentTimestamp.isDefined => priority -> recorder.currentConsistentTimestamp.get
   }.toMap
@@ -31,25 +37,29 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   private val totalTaskCount = new AtomicInteger()
 
   def enqueue(taskItem: QueueItem.Task) = {
+
+    // Get the max rebuild position and initialize it if necessary.
+    def getOrInitializeRebuildEndPosition: Timestamp = synchronized {
+      rebuildEndPositions.get(taskItem.priority) match {
+        case Some(id) => id
+        case None => {
+          rebuildEndPositions += taskItem.priority -> taskItem.taskId
+          taskItem.taskId
+        }
+      }
+    }
+
     recorders.get(taskItem.priority) match {
       case Some(recorder) => {
         val request = item2request(taskItem)
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
 
-        // TODO: Explain WTF is this!!!
-        val minIncrementId = synchronized {
-          rebuildEndPositions.get(taskItem.priority) match {
-            case Some(id) => id
-            case None => {
-              rebuildEndPositions += taskItem.priority -> taskItem.taskId
-              taskItem.taskId
-            }
-          }
-        }
-        if (taskItem.taskId > minIncrementId) {
+        // Only update the task count if the enqueue task is after the max rebuild position.
+        if (taskItem.taskId > getOrInitializeRebuildEndPosition) {
           totalTaskCount.incrementAndGet()
         }
+
       }
       case None => // TODO
     }
@@ -120,6 +130,12 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
       var all = Set[Timestamp]()
       var processed = Set[Timestamp]()
 
+      // Using breakable (for my sanity sake) as a workaround to the log iterator behavior. The log iterator does not
+      // return items beyond the consistent timestamp (i.e. `next` return None) and `hasNext` continue to returns true.
+      // This behavior is fine for its original purpose i.e. stay open and produce new transactions to replicate once
+      // they are appended to the log.
+      // In our case we want to read tasks up to the `endTimestamp` inclusively. If `endTimestamp` is equals to the
+      // consistent timestamp, `foreach` will spin until a new task is appended which may never occurs.
       import scala.util.control.Breaks._
       breakable {
         items.takeWhile(_.timestamp <= endTimestamp).foreach { item =>
@@ -132,6 +148,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
             case _ => // Ignore other items. They are either ack for tasks prior the initial timestamp or responses
           }
 
+          // Read the last task, get out of here!
           if (item.timestamp == endTimestamp) {
             break()
           }
