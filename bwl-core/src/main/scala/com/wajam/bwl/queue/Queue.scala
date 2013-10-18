@@ -8,10 +8,11 @@ import com.wajam.spnl.TaskContext
 import scala.concurrent.Future
 import com.wajam.spnl.feeder.Feeder.FeederData
 import language.implicitConversions
+import scala.util.Random
 
 case class Priority(value: Int, weight: Int)
 
-class PrioritySelector(priorities: Iterable[Priority])
+class PrioritySelector(priorities: Iterable[Priority])(implicit random: Random = Random)
   extends WeightedItemsSelector(priorities.map(p => (p.weight.toDouble, p.value)))
 
 case class QueueDefinition(name: String, callback: QueueTask.Callback, taskContext: TaskContext = new TaskContext,
@@ -21,13 +22,13 @@ sealed trait QueueItem
 
 object QueueItem {
 
-  case class Task(taskId: Timestamp, token: Long, priority: Int, data: Any) extends QueueItem
+  case class Task(taskId: Timestamp, token: Long, priority: Int, data: Any) extends QueueItem {
+    def toFeederData: FeederData = {
+      Map("token" -> token, "id" -> taskId.value, "priority" -> priority, "data" -> data)
+    }
+  }
 
   case class Ack(ackId: Timestamp, taskId: Timestamp) extends QueueItem
-
-  implicit def item2data(item: QueueItem.Task): FeederData = {
-    Map("token" -> item.token, "id" -> item.taskId.value, "priority" -> item.priority, "data" -> item.data)
-  }
 
   implicit val TaskOrdering = new Ordering[QueueItem.Task] {
     def compare(x: QueueItem.Task, y: QueueItem.Task) = x.taskId.compareTo(y.taskId)
@@ -52,9 +53,9 @@ trait Queue {
 
   def priorities: Iterable[Priority] = definition.priorities
 
-  def enqueue(taskItem: QueueItem.Task)
+  def enqueue(taskItem: QueueItem.Task): QueueItem.Task
 
-  def ack(ackItem: QueueItem.Ack)
+  def ack(ackItem: QueueItem.Ack): QueueItem.Ack
 
   def feeder: Feeder
 
