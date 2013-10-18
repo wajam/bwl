@@ -11,11 +11,12 @@ import com.wajam.bwl.QueueResource._
 import scala.collection.immutable.TreeMap
 import com.wajam.spnl.feeder.Feeder._
 import com.wajam.bwl.queue.QueueDefinition
+import scala.util.Random
 
 /**
  * Simple memory queue. MUST not be used in production.
  */
-class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queue {
+class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit random: Random = Random) extends Queue {
 
   private val selector = new PrioritySelector(priorities)
   private val queues = priorities.map(_.value -> new ConcurrentLinkedQueue[QueueItem.Task]).toMap
@@ -84,7 +85,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition) extends Queu
 }
 
 object MemoryQueue {
-  def create(token: Long, definition: QueueDefinition, service: Service): Queue = {
+  def create(token: Long, definition: QueueDefinition, service: Service)(implicit random: Random = Random): Queue = {
     new MemoryQueue(token, definition)
   }
 }

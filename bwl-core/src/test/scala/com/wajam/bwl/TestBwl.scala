@@ -23,6 +23,7 @@ import com.wajam.bwl.queue.log.LogQueue
 import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
 import org.apache.commons.io.FileUtils
+import scala.util.Random
 
 trait BwlFixture extends MockitoSugar {
 
@@ -83,6 +84,8 @@ trait BwlFixture extends MockitoSugar {
 object BwlFixture {
 
   trait QueueFactory {
+    implicit val random = new Random(999)
+
     type Factory = (Long, QueueDefinition, Service) => Queue
 
     def name: String
@@ -127,7 +130,7 @@ trait MultipleQueueFixture {
   this: BwlFixture =>
 
   lazy val definition = QueueDefinition("weighted", okCallback(mockCallback), newTaskContext,
-    priorities = List(Priority(1, weight = 33), Priority(2, weight = 66)))
+    priorities = List(Priority(1, weight = 66), Priority(2, weight = 33)))
 }
 
 @RunWith(classOf[JUnitRunner])
@@ -161,13 +164,13 @@ class TestBwl extends FunSuite {
 
         val dataCaptor = ArgumentCaptor.forClass(classOf[Map[String, Any]])
         verify(f.mockCallback, timeout(5000).atLeast(100)).process(dataCaptor.capture())
-        val values = dataCaptor.getAllValues.toList
 
+        val values = dataCaptor.getAllValues.toList.take(100)
         val p1Count = values.map(_("p")).count(_ == 1)
         val p2Count = values.map(_("p")).count(_ == 2)
-        p2Count should be > p1Count
-        // TODO: replace println() with a better check
-        println(s"1=$p1Count, 2=$p2Count")
+
+        p1Count should (be > 60 and be < 70)
+        p2Count should (be > 30 and be < 40)
       })
     }
 

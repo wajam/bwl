@@ -15,12 +15,13 @@ import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
 import java.util.concurrent.atomic.AtomicInteger
 import LogQueue._
+import scala.util.Random
 
 /**
  * Persistent queue using NRV transaction log as backing storage. Each priority is appended to separate log.
  */
 class LogQueue(val token: Long, service: Service, val definition: QueueDefinition,
-               recorderFactory: RecorderFactory) extends Queue {
+               recorderFactory: RecorderFactory)(implicit random: Random = Random) extends Queue {
 
   private val recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
   private var rebuildEndPositions: Map[Int, Timestamp] = recorders.collect {
@@ -222,7 +223,7 @@ object LogQueue {
    * Creates a new LogQueue. This factory method is usable as [[com.wajam.bwl.queue.Queue.QueueFactory]] with the
    * Bwl service
    */
-  def create(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000)(token: Long, definition: QueueDefinition, service: Service): Queue = {
+  def create(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000)(token: Long, definition: QueueDefinition, service: Service)(implicit random: Random = Random): Queue = {
 
     val logDir = Paths.get(dataDir.getCanonicalPath, service.name, "queues")
     def consistencyDelay: Long = {
