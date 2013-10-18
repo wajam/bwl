@@ -10,6 +10,8 @@ import com.wajam.spnl._
 import com.wajam.bwl.queue.QueueDefinition
 import com.wajam.nrv.data.MInt
 import com.wajam.commons.Logging
+import java.util.concurrent.TimeUnit
+import com.wajam.nrv.TimeoutException
 
 class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQueue: QueueFactory,
           spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)
@@ -76,6 +78,10 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
     QueueWrapper(queue, task)
   }
 
+  // Compute the elapsed time after which a callback does not result to a task acknowledgement even if successful.
+  // After that duration, it is assumed that SPNL has already timed out and scheduled a retry for the task.
+  private def callbackTimeout = math.max(responseTimeout * 0.75, responseTimeout - 500)
+
   private def queueCallbackAdapter(definition: QueueDefinition)(request: SpnlRequest) {
     import QueueTask.Result
     import QueueResource._
@@ -90,21 +96,35 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
       }
     }
 
+    val startTime = System.currentTimeMillis()
     val data = request.message.getData[TaskData]
     val taskToken = data.token
     val taskId = data.values(TaskId).toString.toLong
+    val priority = data.values(TaskPriority).toString.toInt
+
+    def executeIfCallbackNotExpired(block: => Any) {
+      val elapsedTime = System.currentTimeMillis() - startTime
+      debug(s"'Task ${definition.name}:$priority:$taskId' callback elapsedTime: $elapsedTime")
+      if (elapsedTime < callbackTimeout) {
+        block
+      } else {
+        warn(s"Task '${definition.name}:$priority:$taskId' callback took too much time to execute ($elapsedTime ms)")
+      }
+    }
 
     val response = definition.callback(data.values("data"))
     response.onSuccess {
       case Result.Ok => {
-        // TODO: ignore result if elapse time > task timeout
-        ack(taskToken, definition.name, taskId)
-        request.ok()
+        executeIfCallbackNotExpired {
+          ack(taskToken, definition.name, taskId)
+          request.ok()
+        }
       }
       case Result.Fail(error, ignore) if ignore => {
-        // TODO: ignore result if elapse time > task timeout
-        ack(taskToken, definition.name, taskId)
-        request.ignore(error)
+        executeIfCallbackNotExpired {
+          ack(taskToken, definition.name, taskId)
+          request.ignore(error)
+        }
       }
       case Result.Fail(error, ignore) => request.fail(error)
     }

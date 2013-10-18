@@ -70,15 +70,6 @@ trait BwlFixture extends MockitoSugar {
     def process(data: QueueTask.Data)
   }
 
-  def okCallback(callback: Callback)(data: QueueTask.Data): Future[QueueTask.Result] = {
-    import scala.concurrent.future
-    import ExecutionContext.Implicits.global
-
-    future {
-      callback.process(data)
-      QueueTask.Result.Ok
-    }
-  }
 }
 
 object BwlFixture {
@@ -118,18 +109,81 @@ object BwlFixture {
       logDir = null
     }
   }
+
+  class SpyQueueFactory(queueFactory: QueueFactory) extends QueueFactory {
+
+    private var spyQueues: List[Queue] = Nil
+
+    def allQueues = spyQueues
+
+    def queue = spyQueues.head
+
+    def name = queueFactory.name
+
+    override def before() = queueFactory.before()
+
+    override def after() = queueFactory.after()
+
+    def factory = createQueue
+
+    private def createQueue(token: Long, definition: QueueDefinition, service: Service): Queue = {
+      val queue = queueFactory.factory(token, definition, service)
+      spyQueues = spy[Queue](queue) :: spyQueues
+      spyQueues.head
+    }
+  }
+}
+
+trait CallbackFixture {
+  this: BwlFixture =>
+
+  def callback: QueueTask.Callback
+}
+
+abstract class OkCallbackFixture(delay: Long = 0L) extends CallbackFixture {
+  this: BwlFixture =>
+
+  def callback = okCallback(mockCallback)
+
+  def okCallback(callback: Callback)(data: QueueTask.Data): Future[QueueTask.Result] = {
+    import scala.concurrent.future
+    import ExecutionContext.Implicits.global
+
+    future {
+      Thread.sleep(delay)
+      callback.process(data)
+      QueueTask.Result.Ok
+    }
+  }
+}
+
+abstract class FailCallbackFixture(ignore: Boolean = false, delay: Long = 0L) extends CallbackFixture {
+  this: BwlFixture =>
+
+  def callback = failCallback(mockCallback)
+
+  def failCallback(callback: Callback)(data: QueueTask.Data): Future[QueueTask.Result] = {
+    import scala.concurrent.future
+    import ExecutionContext.Implicits.global
+
+    future {
+      Thread.sleep(delay)
+      callback.process(data)
+      QueueTask.Result.Fail(new Exception(), ignore)
+    }
+  }
 }
 
 trait SingleQueueFixture {
-  this: BwlFixture =>
+  this: BwlFixture with CallbackFixture =>
 
-  lazy val definition = QueueDefinition("single", okCallback(mockCallback), newTaskContext)
+  lazy val definition = QueueDefinition("single", callback, newTaskContext)
 }
 
 trait MultipleQueueFixture {
-  this: BwlFixture =>
+  this: BwlFixture with CallbackFixture =>
 
-  lazy val definition = QueueDefinition("weighted", okCallback(mockCallback), newTaskContext,
+  lazy val definition = QueueDefinition("weighted", callback, newTaskContext,
     priorities = List(Priority(1, weight = 66), Priority(2, weight = 33)))
 }
 
@@ -141,7 +195,7 @@ class TestBwl extends FunSuite {
   def singlePriorityQueue(implicit queueFactory: QueueFactory) {
 
     test(queueFactory.name + " - queue should enqueue and dequeue expected value") {
-      new BwlFixture with SingleQueueFixture {}.runWithFixture((f) => {
+      new OkCallbackFixture with BwlFixture with SingleQueueFixture {}.runWithFixture((f) => {
         import ExecutionContext.Implicits.global
 
         f.bwl.enqueue(0, f.definition.name, "hello")
@@ -157,7 +211,7 @@ class TestBwl extends FunSuite {
     test(queueFactory.name + " - enqueued priority weights should be respected") {
       import ExecutionContext.Implicits.global
 
-      new BwlFixture with MultipleQueueFixture {}.runWithFixture((f) => {
+      new OkCallbackFixture with BwlFixture with MultipleQueueFixture {}.runWithFixture((f) => {
         val enqueued = f.definition.priorities.flatMap(p => 1.to(200).map(i =>
           f.bwl.enqueue(i, f.definition.name, Map("p" -> p.value, "i" -> i), Some(p.value))))
         Await.result(Future.sequence(enqueued), 5.seconds)
@@ -180,4 +234,118 @@ class TestBwl extends FunSuite {
   testsFor(multiplePrioritiesQueue(memoryQueueFactory))
   testsFor(singlePriorityQueue(persistentQueueFactory))
   testsFor(multiplePrioritiesQueue(persistentQueueFactory))
+
+  test("ok callback should BE akcnowledged") {
+    implicit val spyQueueFactory = new SpyQueueFactory(memoryQueueFactory)
+
+    new OkCallbackFixture with BwlFixture with SingleQueueFixture {}.runWithFixture((f) => {
+      import ExecutionContext.Implicits.global
+
+      f.bwl.enqueue(0, f.definition.name, "hello")
+      verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
+
+      val spyQueue = spyQueueFactory.queue
+      val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
+      val ackCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Ack])
+      verify(spyQueue, timeout(2000)).enqueue(taskCaptor.capture())
+      taskCaptor.getAllValues.size() should be(1)
+
+      verify(spyQueue, timeout(2000)).ack(ackCaptor.capture())
+      ackCaptor.getAllValues.size() should be(1)
+    })
+  }
+
+  test("fail callback should NOT BE acknowledged") {
+
+    implicit val spyQueueFactory = new SpyQueueFactory(memoryQueueFactory)
+
+    new FailCallbackFixture() with BwlFixture with SingleQueueFixture {}.runWithFixture((f) => {
+      import ExecutionContext.Implicits.global
+
+      f.bwl.enqueue(0, f.definition.name, "hello")
+      verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
+
+      val spyQueue = spyQueueFactory.queue
+      val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
+      val ackCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Ack])
+      verify(spyQueue, timeout(2000)).enqueue(taskCaptor.capture())
+      taskCaptor.getAllValues.size() should be(1)
+
+      Thread.sleep(100)
+      verify(spyQueue, never()).ack(ackCaptor.capture())
+      ackCaptor.getAllValues.size() should be(0)
+    })
+  }
+
+  test("fail ignore callback should BE acknowledged") {
+
+    implicit val spyQueueFactory = new SpyQueueFactory(memoryQueueFactory)
+
+    new FailCallbackFixture(ignore = true) with BwlFixture with SingleQueueFixture {}.runWithFixture((f) => {
+      import ExecutionContext.Implicits.global
+
+      f.bwl.enqueue(0, f.definition.name, "hello")
+      verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
+
+      val spyQueue = spyQueueFactory.queue
+      val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
+      val ackCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Ack])
+      verify(spyQueue, timeout(2000)).enqueue(taskCaptor.capture())
+      taskCaptor.getAllValues.size() should be(1)
+
+      verify(spyQueue, timeout(2000)).ack(ackCaptor.capture())
+      ackCaptor.getAllValues.size() should be(1)
+    })
+  }
+
+  test("ok callback completed after response timeout should NOT BE acknowledged") {
+
+    implicit val spyQueueFactory = new SpyQueueFactory(memoryQueueFactory)
+
+    new OkCallbackFixture(delay = 300L) with BwlFixture with SingleQueueFixture {}.runWithFixture((f) => {
+      import ExecutionContext.Implicits.global
+
+      f.bwl.applySupport(responseTimeout = Some(200L))
+
+      f.bwl.enqueue(0, f.definition.name, "hello")
+      verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
+
+      val spyQueue = spyQueueFactory.queue
+      val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
+      val ackCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Ack])
+      verify(spyQueue, timeout(2000)).enqueue(taskCaptor.capture())
+      taskCaptor.getAllValues.size() should be(1)
+
+      // Sleep to give enough time to timeout
+      Thread.sleep(500)
+      verify(spyQueue, never()).ack(ackCaptor.capture())
+      ackCaptor.getAllValues.size() should be(0)
+    })
+  }
+
+  test("fail ignore callback completed after response timeout should NOT BE acknowledged") {
+
+    implicit val spyQueueFactory = new SpyQueueFactory(memoryQueueFactory)
+
+    new FailCallbackFixture(delay = 300L, ignore = true) with BwlFixture with SingleQueueFixture {}.runWithFixture((f) => {
+      import ExecutionContext.Implicits.global
+
+      f.bwl.applySupport(responseTimeout = Some(200L))
+
+      f.bwl.enqueue(0, f.definition.name, "hello")
+      verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
+
+      val spyQueue = spyQueueFactory.queue
+      val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
+      val ackCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Ack])
+      verify(spyQueue, timeout(2000)).enqueue(taskCaptor.capture())
+      taskCaptor.getAllValues.size() should be(1)
+
+      // Sleep to give enough time to timeout
+      Thread.sleep(500)
+      verify(spyQueue, never()).ack(ackCaptor.capture())
+      ackCaptor.getAllValues.size() should be(0)
+    })
+  }
+
 }
