@@ -16,6 +16,7 @@ import com.wajam.bwl.queue.QueueDefinition
 import java.util.concurrent.atomic.AtomicInteger
 import LogQueue._
 import scala.util.Random
+import scala.annotation.tailrec
 
 /**
  * Persistent queue using NRV transaction log as backing storage. Each priority is appended to separate log.
@@ -127,34 +128,27 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
         item <- message2item(msg, service)
       } yield item
 
-      var all = Set[Timestamp]()
-      var processed = Set[Timestamp]()
-
-      // Using breakable (for my sanity sake) as a workaround to the log iterator behavior. The log iterator does not
-      // return items beyond the consistent timestamp (i.e. `next` return None) and `hasNext` continue to returns true.
-      // This behavior is fine for its original purpose i.e. stay open and produce new transactions to replicate once
-      // they are appended to the log.
-      // In our case we want to read tasks up to the `endTimestamp` inclusively. If `endTimestamp` is equals to the
-      // consistent timestamp, `foreach` will spin until a new task is appended which may never occurs.
-      import scala.util.control.Breaks._
-      breakable {
-        items.takeWhile(_.timestamp <= endTimestamp).foreach { item =>
-          item match {
-            case taskItem: QueueItem.Task => all += taskItem.taskId
-            case ackItem: QueueItem.Ack if all.contains(ackItem.taskId) => {
-              all -= ackItem.taskId
-              processed += ackItem.taskId
-            }
-            case _ => // Ignore other items. They are either ack for tasks prior the initial timestamp or responses
+      // The log iterator does not return items beyond the consistent timestamp (i.e. `next` return None) and
+      // `hasNext` continue to returns true. This behavior is fine for its original purpose i.e. stay open and
+      // produce new transactions to replicate once they are appended to the log.
+      // In our case we want to read tasks up to the `endTimestamp` inclusively.
+      @tailrec
+      def processNext(allItems: Set[Timestamp], processedItems: Set[Timestamp]): (Set[Timestamp], Set[Timestamp]) = {
+        val (itemId, all, processed) = items.next() match {
+          case taskItem: QueueItem.Task if taskItem.taskId <= endTimestamp => {
+            (taskItem.taskId, allItems + taskItem.taskId, processedItems)
           }
-
-          // Read the last task, get out of here!
-          if (item.timestamp == endTimestamp) {
-            break()
+          case taskItem: QueueItem.Task => (taskItem.taskId, allItems, processedItems)
+          case ackItem: QueueItem.Ack if allItems.contains(ackItem.taskId) => {
+            (ackItem.ackId, allItems - ackItem.taskId, processedItems + ackItem.taskId)
           }
+          case ackItem: QueueItem.Ack => (ackItem.ackId, allItems, processedItems)
         }
+
+        if (itemId != endTimestamp) processNext(all, processed) else (all, processed)
       }
 
+      val (all, processed) = processNext(Set(), Set())
       (all.size, processed)
     }
   }

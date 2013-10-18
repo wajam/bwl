@@ -16,7 +16,6 @@ import com.wajam.bwl.FeederTestHelper._
 import org.scalatest.matchers.ShouldMatchers._
 import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
-import scala.Some
 import com.wajam.spnl.feeder.Feeder
 
 @RunWith(classOf[JUnitRunner])
@@ -59,7 +58,7 @@ class TestLogQueue extends FlatSpec {
           queue
         }
 
-        test(() => createQueue)
+        test(createQueue _)
       } finally {
         queues.foreach(_.stop())
         FileUtils.deleteDirectory(dataDir)
@@ -81,7 +80,7 @@ class TestLogQueue extends FlatSpec {
   /**
    * QueueStats wrapper which facilitate stats verification during the test
    */
-  class QueueStatsLike(stats: QueueStats) extends QueueStats {
+  implicit class QueueStatsVerifier(stats: QueueStats) extends QueueStats {
     def totalTasks = stats.totalTasks
     def pendingTasks = stats.pendingTasks
     def delayedTasks = stats.delayedTasks
@@ -93,8 +92,6 @@ class TestLogQueue extends FlatSpec {
       stats.delayedTasks.toList should be(delayedTasks.toList)
     }
   }
-
-  implicit def stats2like(stats: QueueStats): QueueStatsLike = new QueueStatsLike(stats)
 
   "Queue" should "enqueue and produce tasks" in new QueueService {
     withQueueFactory(createQueue => {
