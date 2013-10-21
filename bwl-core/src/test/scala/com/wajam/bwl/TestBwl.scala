@@ -25,20 +25,18 @@ import com.wajam.bwl.queue.QueueDefinition
 import org.apache.commons.io.FileUtils
 import scala.util.Random
 
-trait BwlFixture extends MockitoSugar {
+trait BwlFixture extends CallbackFixture with MockitoSugar {
 
   import BwlFixture._
 
   var bwl: Bwl = null
   var cluster: Cluster = null
-  var mockCallback: Callback = null
 
   def definition: QueueDefinition
 
   def runWithFixture(test: (BwlFixture) => Any)(implicit queueFactory: QueueFactory) {
     try {
       queueFactory.before()
-      mockCallback = mock[Callback]
 
       val manager = new StaticClusterManager
       cluster = new Cluster(new LocalNode("localhost", Map("nrv" -> 40373)), manager)
@@ -59,17 +57,11 @@ trait BwlFixture extends MockitoSugar {
       cluster.stop()
       cluster = null
       bwl = null
-      mockCallback = null
       queueFactory.after()
     }
   }
 
   def newTaskContext = new TaskContext(normalRate = 50, throttleRate = 50)
-
-  trait Callback {
-    def process(data: QueueTask.Data)
-  }
-
 }
 
 object BwlFixture {
@@ -116,8 +108,6 @@ object BwlFixture {
 
     def allQueues = spyQueues
 
-    def queue = spyQueues.head
-
     def name = queueFactory.name
 
     override def before() = queueFactory.before()
@@ -134,56 +124,52 @@ object BwlFixture {
   }
 }
 
-trait CallbackFixture {
-  this: BwlFixture =>
+trait CallbackFixture extends MockitoSugar {
 
-  def callback: QueueTask.Callback
+  trait MockableCallback {
+    def process(data: QueueTask.Data)
+  }
+
+  val mockCallback: MockableCallback = mock[MockableCallback]
+
+  def taskCallback: QueueTask.Callback
 }
 
 abstract class OkCallbackFixture(delay: Long = 0L) extends CallbackFixture {
-  this: BwlFixture =>
 
-  def callback = okCallback(mockCallback)
+  import scala.concurrent.future
+  import ExecutionContext.Implicits.global
 
-  def okCallback(callback: Callback)(data: QueueTask.Data): Future[QueueTask.Result] = {
-    import scala.concurrent.future
-    import ExecutionContext.Implicits.global
-
-    future {
-      Thread.sleep(delay)
-      callback.process(data)
-      QueueTask.Result.Ok
-    }
+  def taskCallback = (data) => future {
+    Thread.sleep(delay)
+    mockCallback.process(data)
+    QueueTask.Result.Ok
   }
 }
 
 abstract class FailCallbackFixture(ignore: Boolean = false, delay: Long = 0L) extends CallbackFixture {
   this: BwlFixture =>
 
-  def callback = failCallback(mockCallback)
+  import scala.concurrent.future
+  import ExecutionContext.Implicits.global
 
-  def failCallback(callback: Callback)(data: QueueTask.Data): Future[QueueTask.Result] = {
-    import scala.concurrent.future
-    import ExecutionContext.Implicits.global
-
-    future {
-      Thread.sleep(delay)
-      callback.process(data)
-      QueueTask.Result.Fail(new Exception(), ignore)
-    }
+  def taskCallback = (data) => future {
+    Thread.sleep(delay)
+    mockCallback.process(data)
+    QueueTask.Result.Fail(new Exception(), ignore)
   }
 }
 
 trait SingleQueueFixture {
   this: BwlFixture with CallbackFixture =>
 
-  lazy val definition = QueueDefinition("single", callback, newTaskContext)
+  lazy val definition = QueueDefinition("single", taskCallback, newTaskContext)
 }
 
 trait MultipleQueueFixture {
   this: BwlFixture with CallbackFixture =>
 
-  lazy val definition = QueueDefinition("weighted", callback, newTaskContext,
+  lazy val definition = QueueDefinition("weighted", taskCallback, newTaskContext,
     priorities = List(Priority(1, weight = 66), Priority(2, weight = 33)))
 }
 
@@ -244,7 +230,7 @@ class TestBwl extends FunSuite {
       f.bwl.enqueue(0, f.definition.name, "hello")
       verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
 
-      val spyQueue = spyQueueFactory.queue
+      val spyQueue = spyQueueFactory.allQueues.head
       val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
       val ackCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Ack])
       verify(spyQueue, timeout(2000)).enqueue(taskCaptor.capture())
@@ -265,7 +251,7 @@ class TestBwl extends FunSuite {
       f.bwl.enqueue(0, f.definition.name, "hello")
       verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
 
-      val spyQueue = spyQueueFactory.queue
+      val spyQueue = spyQueueFactory.allQueues.head
       val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
       val ackCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Ack])
       verify(spyQueue, timeout(2000)).enqueue(taskCaptor.capture())
@@ -287,7 +273,7 @@ class TestBwl extends FunSuite {
       f.bwl.enqueue(0, f.definition.name, "hello")
       verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
 
-      val spyQueue = spyQueueFactory.queue
+      val spyQueue = spyQueueFactory.allQueues.head
       val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
       val ackCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Ack])
       verify(spyQueue, timeout(2000)).enqueue(taskCaptor.capture())
@@ -310,7 +296,7 @@ class TestBwl extends FunSuite {
       f.bwl.enqueue(0, f.definition.name, "hello")
       verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
 
-      val spyQueue = spyQueueFactory.queue
+      val spyQueue = spyQueueFactory.allQueues.head
       val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
       val ackCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Ack])
       verify(spyQueue, timeout(2000)).enqueue(taskCaptor.capture())
@@ -335,7 +321,7 @@ class TestBwl extends FunSuite {
       f.bwl.enqueue(0, f.definition.name, "hello")
       verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
 
-      val spyQueue = spyQueueFactory.queue
+      val spyQueue = spyQueueFactory.allQueues.head
       val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
       val ackCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Ack])
       verify(spyQueue, timeout(2000)).enqueue(taskCaptor.capture())

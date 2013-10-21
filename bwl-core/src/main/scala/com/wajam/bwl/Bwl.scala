@@ -102,11 +102,11 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
     val taskId = data.values(TaskId).toString.toLong
     val priority = data.values(TaskPriority).toString.toInt
 
-    def executeIfCallbackNotExpired(block: => Any) {
+    def executeIfCallbackNotExpired(function: => Any) {
       val elapsedTime = System.currentTimeMillis() - startTime
       debug(s"'Task ${definition.name}:$priority:$taskId' callback elapsedTime: $elapsedTime")
       if (elapsedTime < callbackTimeout) {
-        block
+        function
       } else {
         warn(s"Task '${definition.name}:$priority:$taskId' callback took too much time to execute ($elapsedTime ms)")
       }
