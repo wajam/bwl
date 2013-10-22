@@ -24,16 +24,18 @@ import LogQueue._
  * Persistent queue using NRV transaction log as backing storage. Each priority is appended to separate log.
  */
 class LogQueue(val token: Long, service: Service, val definition: QueueDefinition,
-               recorderFactory: RecorderFactory)(implicit random: Random = Random) extends Queue with Logging {
+               recorderFactory: RecorderFactory)(implicit random: Random = Random) extends ConsistentQueue with Logging {
 
-  private var recorders: Map[Int, TransactionRecorder] = Map()
+  private var recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
 
   // Must not read tasks from logs beyond this position when rebuilding the initial state (rebuild is lazy and per priority),
   // By default the max rebuild position is the last item present in the log at the time the queue is created.
   // The state is also updated as new task are enqueued. The max rebuild position ensure that tasks enqueued before the
   // state is rebuilt are not computed twice. If the queue is empty and has no log, the max rebuild position is
   // initialized later at the first enqueued task.
-  private var rebuildEndPositions: Map[Int, Timestamp] = Map()
+  private var rebuildEndPositions: Map[Int, Timestamp] = recorders.collect {
+    case (priority, recorder) if recorder.currentConsistentTimestamp.isDefined => priority -> recorder.currentConsistentTimestamp.get
+  }.toMap
 
   private val totalTaskCount = new AtomicInteger()
 
@@ -85,20 +87,42 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
     ackItem
   }
 
-  val feeder = new LogQueueFeeder(definition, createPriorityQueueReader)
+  val feeder = new LogQueueFeeder(definition, createPriorityTaskItemReader)
 
   def stats: QueueStats = LogQueueStats
+
+  def getLastQueueItemId = recorders.valuesIterator.flatMap(_.currentConsistentTimestamp).reduceOption(Ordering[Timestamp].max)
+
+  def readQueueItems(fromItemId: Timestamp, toItemId: Timestamp) = {
+
+    val sources = recorders.map {
+      case (priority, recorder) => {
+        val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
+        val initialTimestamp = Ordering[Timestamp].max(findStartTimestamp(txLog), fromItemId)
+        val itr = new TransactionLogReplicationIterator(recorder.member,
+          initialTimestamp, txLog, recorder.currentConsistentTimestamp)
+        (priority, itr)
+      }
+    }.toMap
+
+    new QueueItemReader(service, toItemId, sources)
+  }
+
+  def writeQueueItem(item: QueueItem) = item match {
+    case taskItem: QueueItem.Task => enqueue(taskItem)
+    case ackItem: QueueItem.Ack => ack(ackItem)
+  }
 
   /**
    * Creates a new LogQueueFeeder.QueueReader. This method is passed as a factory function to the
    * LogQueueFeeder constructor.
    */
-  private def createPriorityQueueReader(priority: Int, startTimestamp: Option[Timestamp]): LogQueueReader = {
+  private def createPriorityTaskItemReader(priority: Int, startTimestamp: Option[Timestamp]): PriorityTaskItemReader = {
     requireStarted()
 
     val recorder = recorders(priority)
 
-    def createLogQueueReader: LogQueueReader = {
+    def createLogTaskReader: PriorityTaskItemReader = {
       val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
       val initialTimestamp = startTimestamp.getOrElse(findStartTimestamp(txLog))
 
@@ -110,10 +134,10 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
 
       val itr = new TransactionLogReplicationIterator(recorder.member,
         initialTimestamp, txLog, recorder.currentConsistentTimestamp)
-      LogQueueReader(service, itr, processed)
+      PriorityTaskItemReader(service, itr, processed)
     }
 
-    new DelayedQueueReader(recorder, createLogQueueReader)
+    new DelayedPriorityTaskItemReader(recorder, createLogTaskReader)
   }
 
   /**
@@ -177,6 +201,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
     debug(s"Finding the start timestamp '${txLog.service}'")
 
     using(txLog.read) { itr =>
+      implicit val ord = Ordering[Option[Timestamp]]
       val firstTimestamp = txLog.firstRecord(timestamp = None).map(_.timestamp)
       val startRange = itr.takeWhile(_.consistentTimestamp < firstTimestamp).collect {
         case r: TimestampedRecord => r.timestamp.value
@@ -189,10 +214,6 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
     if (!started) {
       started = true
       debug(s"Starting queue '$name'")
-      recorders = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
-      rebuildEndPositions = recorders.collect {
-        case (priority, recorder) if recorder.currentConsistentTimestamp.isDefined => priority -> recorder.currentConsistentTimestamp.get
-      }.toMap
       recorders.valuesIterator.foreach(_.start())
     }
   }
@@ -209,46 +230,6 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
     if (!started) {
       throw new IllegalStateException(s"Queue '$name' not started!")
     }
-  }
-
-  /**
-   * Queue reader wrapper which ensure that log exists and is NOT empty before creating the real LogQueueReader.
-   * Achieved by waiting until TransactionRecorder produces a valid consistent timestamp.
-   */
-  private class DelayedQueueReader(recorder: TransactionRecorder, createReader: => LogQueueReader)
-      extends LogQueueReader {
-
-    private var reader: Option[LogQueueReader] = None
-
-    private def getOrCreateReader: LogQueueReader = reader match {
-      case None if recorder.currentConsistentTimestamp.isEmpty => InfiniteEmptyReader
-      case None => {
-        val itr = createReader
-        reader = Some(itr)
-        itr
-      }
-      case Some(itr) => itr
-    }
-
-    def hasNext = getOrCreateReader.hasNext
-
-    def next() = getOrCreateReader.next()
-
-    def close() {
-      reader.foreach(_.close())
-    }
-
-    def delayedTasks = getOrCreateReader.delayedTasks
-  }
-
-  private object InfiniteEmptyReader extends LogQueueReader {
-    def hasNext = true
-
-    def next() = None
-
-    def close() {}
-
-    def delayedTasks = Nil
   }
 
   private object LogQueueStats extends QueueStats {

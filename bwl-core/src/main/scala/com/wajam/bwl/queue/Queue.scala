@@ -30,8 +30,13 @@ object QueueItem {
 
   case class Ack(ackId: Timestamp, taskId: Timestamp) extends QueueItem
 
-  implicit val TaskOrdering = new Ordering[QueueItem.Task] {
-    def compare(x: QueueItem.Task, y: QueueItem.Task) = x.taskId.compareTo(y.taskId)
+  implicit val Ordering = new Ordering[QueueItem] {
+    def compare(x: QueueItem, y: QueueItem) = idFor(x).compareTo(idFor(y))
+
+    private def idFor(item: QueueItem): Timestamp = item match {
+      case taskItem: QueueItem.Task => taskItem.taskId
+      case ackItem: QueueItem.Ack => ackItem.ackId
+    }
   }
 }
 

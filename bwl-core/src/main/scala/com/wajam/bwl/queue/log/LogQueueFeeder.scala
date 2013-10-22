@@ -14,11 +14,11 @@ import scala.util.Random
 /**
  * Feeder implementation for the LogQueue persistent queue.
  */
-class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Option[Timestamp]) => LogQueueReader)(implicit random: Random = Random)
+class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Option[Timestamp]) => PriorityTaskItemReader)(implicit random: Random = Random)
     extends Feeder {
 
   private val selector = new PrioritySelector(definition.priorities)
-  private var readers: Map[Int, LogQueueReader] = Map()
+  private var readers: Map[Int, PriorityTaskItemReader] = Map()
   private var randomTaskIterator: PeekIterator[Option[QueueItem.Task]] = PeekIterator(Iterator())
 
   // Keep track of non-acknowledged task and oldest task per priority

@@ -30,12 +30,12 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
   def toSomeFeederData(id: Long, priority: Int = 1): Option[FeederData] = Some(toTask(id, priority).toFeederData)
 
   "Feeder" should "returns expected name" in {
-    val feeder = new LogQueueFeeder(QueueDefinition("name", dummyCallback), (_, _) => mock[LogQueueReader])
+    val feeder = new LogQueueFeeder(QueueDefinition("name", dummyCallback), (_, _) => mock[PriorityTaskItemReader])
     feeder.name should be("name")
   }
 
   it should "produce expected tasks" in {
-    val mockReader = mock[LogQueueReader]
+    val mockReader = mock[PriorityTaskItemReader]
     when(mockReader.hasNext).thenReturn(true)
     when(mockReader.next()).thenReturn(toSomeTask(1L), None, toSomeTask(2L), toSomeTask(3L), None)
     when(mockReader.delayedTasks).thenReturn(Nil)
@@ -76,8 +76,8 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
     val expectedStartTimestamp: Timestamp = 5L
     var actualStartTimestamp: Option[Timestamp] = None
 
-    val mockReader = mock[LogQueueReader]
-    def createReader(priority: Int, startTimestamp: Option[Timestamp]): LogQueueReader = {
+    val mockReader = mock[PriorityTaskItemReader]
+    def createReader(priority: Int, startTimestamp: Option[Timestamp]): PriorityTaskItemReader = {
       actualStartTimestamp = startTimestamp
       mockReader
     }
@@ -101,11 +101,11 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
     }
 
     var answers: Map[Int, NextAnswerCounter] = Map()
-    def createReader(priority: Int, startTimestamp: Option[Timestamp]): LogQueueReader = {
+    def createReader(priority: Int, startTimestamp: Option[Timestamp]): PriorityTaskItemReader = {
       val nextAnswer = new NextAnswerCounter(priority)
       answers += priority -> nextAnswer
 
-      val mockReader = mock[LogQueueReader]
+      val mockReader = mock[PriorityTaskItemReader]
       when(mockReader.hasNext).thenReturn(true)
       when(mockReader.next()).thenAnswer(nextAnswer)
       mockReader
@@ -129,12 +129,12 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
     val priority1DelayedTasks = List(toTask(id = 1, priority = 1), toTask(id = 3, priority = 1))
     val priority2DelayedTasks = List(toTask(id = 2, priority = 2))
 
-    val mockReader1 = mock[LogQueueReader]
+    val mockReader1 = mock[PriorityTaskItemReader]
     when(mockReader1.delayedTasks).thenReturn(priority1DelayedTasks)
-    val mockReader2 = mock[LogQueueReader]
+    val mockReader2 = mock[PriorityTaskItemReader]
     when(mockReader2.delayedTasks).thenReturn(priority2DelayedTasks)
 
-    def createReader(priority: Int, startTimestamp: Option[Timestamp]): LogQueueReader = priority match {
+    def createReader(priority: Int, startTimestamp: Option[Timestamp]): PriorityTaskItemReader = priority match {
       case 1 => mockReader1
       case 2 => mockReader2
     }
