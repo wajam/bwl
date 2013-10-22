@@ -104,7 +104,7 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
 
     def executeIfCallbackNotExpired(function: => Any) {
       val elapsedTime = System.currentTimeMillis() - startTime
-      debug(s"'Task ${definition.name}:$priority:$taskId' callback elapsedTime: $elapsedTime")
+      trace(s"'Task ${definition.name}:$priority:$taskId' callback elapsedTime: $elapsedTime")
       if (elapsedTime < callbackTimeout) {
         function
       } else {

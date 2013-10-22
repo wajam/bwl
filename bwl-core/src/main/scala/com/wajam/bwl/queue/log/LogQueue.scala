@@ -6,38 +6,41 @@ import com.wajam.nrv.data._
 import com.wajam.nrv.data.MValue._
 import java.io.File
 import java.nio.file.{ Files, Paths }
-import com.wajam.nrv.consistency.{ ConsistencyMasterSlave, ResolvedServiceMember, TransactionRecorder }
-import com.wajam.nrv.service.Service
+import com.wajam.nrv.consistency._
+import com.wajam.nrv.service.{ TokenRange, Service }
 import com.wajam.nrv.consistency.log.{ TimestampedRecord, FileTransactionLog }
 import com.wajam.nrv.consistency.replication.TransactionLogReplicationIterator
 import com.wajam.bwl.QueueResource._
 import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
 import java.util.concurrent.atomic.AtomicInteger
-import LogQueue._
 import scala.util.Random
 import scala.annotation.tailrec
+import com.wajam.nrv.consistency.log.LogRecord.Index
+import com.wajam.commons.Logging
+import LogQueue._
 
 /**
  * Persistent queue using NRV transaction log as backing storage. Each priority is appended to separate log.
  */
 class LogQueue(val token: Long, service: Service, val definition: QueueDefinition,
-               recorderFactory: RecorderFactory)(implicit random: Random = Random) extends Queue {
+               recorderFactory: RecorderFactory)(implicit random: Random = Random) extends Queue with Logging {
 
-  private val recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
+  private var recorders: Map[Int, TransactionRecorder] = Map()
 
   // Must not read tasks from logs beyond this position when rebuilding the initial state (rebuild is lazy and per priority),
   // By default the max rebuild position is the last item present in the log at the time the queue is created.
   // The state is also updated as new task are enqueued. The max rebuild position ensure that tasks enqueued before the
   // state is rebuilt are not computed twice. If the queue is empty and has no log, the max rebuild position is
   // initialized later at the first enqueued task.
-  private var rebuildEndPositions: Map[Int, Timestamp] = recorders.collect {
-    case (priority, recorder) if recorder.currentConsistentTimestamp.isDefined => priority -> recorder.currentConsistentTimestamp.get
-  }.toMap
+  private var rebuildEndPositions: Map[Int, Timestamp] = Map()
 
   private val totalTaskCount = new AtomicInteger()
 
+  private var started = false
+
   def enqueue(taskItem: QueueItem.Task) = {
+    requireStarted()
 
     // Get the max rebuild position and initialize it if necessary.
     def getOrInitializeRebuildEndPosition: Timestamp = synchronized {
@@ -62,12 +65,14 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
         }
 
       }
-      case None => // TODO
+      case None => throw new IllegalArgumentException(s"Queue '$name' unknown priority ${taskItem.priority}")
     }
     taskItem
   }
 
   def ack(ackItem: QueueItem.Ack) = {
+    requireStarted()
+
     feeder.pendingTaskPriorityFor(ackItem.taskId).flatMap(priority => recorders.get(priority)) match {
       case Some(recorder) => {
         val request = item2request(ackItem)
@@ -75,7 +80,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
         recorder.appendMessage(createSyntheticSuccessResponse(request))
         totalTaskCount.decrementAndGet()
       }
-      case None => // TODO:
+      case None => throw new IllegalArgumentException(s"Cannot acknowledge unknown task ${ackItem.taskId} for queue '$name'")
     }
     ackItem
   }
@@ -89,11 +94,15 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
    * LogQueueFeeder constructor.
    */
   private def createPriorityQueueReader(priority: Int, startTimestamp: Option[Timestamp]): LogQueueReader = {
+    requireStarted()
+
     val recorder = recorders(priority)
 
     def createLogQueueReader: LogQueueReader = {
       val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
       val initialTimestamp = startTimestamp.getOrElse(findStartTimestamp(txLog))
+
+      debug(s"Creating log queue reader '$name:$priority' starting at $initialTimestamp")
 
       // Rebuild in-memory states by reading all the persisted tasks from the transaction log once
       val (total, processed) = rebuildPriorityQueueState(priority, initialTimestamp)
@@ -115,6 +124,8 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   private def rebuildPriorityQueueState(priority: Int, initialTimestamp: Timestamp): (Int, Set[Timestamp]) = {
 
     import com.wajam.commons.Closable.using
+
+    debug(s"Rebuilding queue state '$name:$priority'")
 
     val recorder = recorders(priority)
     val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
@@ -149,6 +160,9 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
       }
 
       val (all, processed) = processNext(Set(), Set())
+
+      debug(s"Rebuilding queue state '$name:$priority' completed (all=${all.size}, processed=${processed.size}})")
+
       (all.size, processed)
     }
   }
@@ -157,8 +171,11 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
    * Returns the oldest log record timestamp starting the beginning of the transaction log. The records may be written
    * out of order in the log. So this methods reads more than the initial record returns the oldest timestamp.
    */
-  def findStartTimestamp(txLog: FileTransactionLog): Timestamp = {
+  private def findStartTimestamp(txLog: FileTransactionLog): Timestamp = {
     import com.wajam.commons.Closable.using
+
+    debug(s"Finding the start timestamp '${txLog.service}'")
+
     using(txLog.read) { itr =>
       val firstTimestamp = txLog.firstRecord(timestamp = None).map(_.timestamp)
       val startRange = itr.takeWhile(_.consistentTimestamp < firstTimestamp).collect {
@@ -169,11 +186,29 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   }
 
   def start() {
-    recorders.valuesIterator.foreach(_.start())
+    if (!started) {
+      started = true
+      debug(s"Starting queue '$name'")
+      recorders = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
+      rebuildEndPositions = recorders.collect {
+        case (priority, recorder) if recorder.currentConsistentTimestamp.isDefined => priority -> recorder.currentConsistentTimestamp.get
+      }.toMap
+      recorders.valuesIterator.foreach(_.start())
+    }
   }
 
   def stop() {
-    recorders.valuesIterator.foreach(_.kill())
+    if (started) {
+      debug(s"Stopping queue '$name'")
+      recorders.valuesIterator.foreach(_.kill())
+      started = false
+    }
+  }
+
+  private def requireStarted() {
+    if (!started) {
+      throw new IllegalStateException(s"Queue '$name' not started!")
+    }
   }
 
   /**
@@ -228,6 +263,8 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
 
 object LogQueue {
 
+  object Logger extends Logging
+
   type RecorderFactory = (Long, QueueDefinition, Priority) => TransactionRecorder
 
   /**
@@ -236,7 +273,11 @@ object LogQueue {
    */
   def create(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000)(token: Long, definition: QueueDefinition, service: Service)(implicit random: Random = Random): Queue = {
 
+    Logger.debug(s"Create log queue '${definition.name}'")
+
     val logDir = Paths.get(dataDir.getCanonicalPath, service.name, "queues")
+    Files.createDirectories(logDir)
+
     def consistencyDelay: Long = {
       val timestampTimeout = service.consistency match {
         case consistency: ConsistencyMasterSlave => consistency.timestampGenerator.responseTimeout
@@ -245,15 +286,40 @@ object LogQueue {
       timestampTimeout + 250
     }
 
-    def createRecorder(token: Long, definition: QueueDefinition, priority: Priority): TransactionRecorder = {
-      Files.createDirectories(logDir)
-      val name = s"${definition.name}#${priority.value}"
-      val txLog = new FileTransactionLog(name, token, logDir.toString, logFileRolloverSize)
-      new TransactionRecorder(ResolvedServiceMember(service, token), txLog, consistencyDelay,
-        service.responseTimeout, logCommitFrequency, {})
+    def queueNameFor(priority: Priority) = s"${definition.name}#${priority.value}"
+
+    def txLogFor(priority: Priority) = new FileTransactionLog(queueNameFor(priority), token, logDir.toString, logFileRolloverSize)
+
+    def memberFor(priority: Priority) = {
+      val ranges = ResolvedServiceMember(service, token).ranges
+      ResolvedServiceMember(queueNameFor(priority), token, ranges) // TODO: Find a better solution to ovveride service name
     }
 
-    new LogQueue(token, service, definition, createRecorder)
+    /**
+     * Ensure the specified priority log tail is properly ended by an Index record.
+     */
+    def finalizeLog(priority: Priority) {
+      val txLog = txLogFor(priority)
+      txLog.getLastLoggedRecord match {
+        case Some(record: TimestampedRecord) => {
+          // Not ended by an Index record. We need to rewrite the log tail to find the last record timestamp.
+          val recovery = new ConsistencyRecovery(txLog.logDir, DummyTruncatableConsistentStore)
+          recovery.rewriteFromRecord(record, txLog, memberFor(priority))
+        }
+        case Some(_: Index) => // Nothing to do, the log is ended by an Index record!!!
+        case None => // Nothing to do, the log is empty.
+      }
+    }
+
+    // Ensure that all logs are properly finalized with an Index record
+    definition.priorities.foreach(finalizeLog)
+
+    val recorderFactory: RecorderFactory = (token, definition, priority) => {
+      Logger.debug(s"Create recorder '${queueNameFor(priority)}'")
+      new TransactionRecorder(memberFor(priority), txLogFor(priority), consistencyDelay, service.responseTimeout, logCommitFrequency, {})
+    }
+
+    new LogQueue(token, service, definition, recorderFactory)
   }
 
   private[log] def message2item(message: Message, service: Service): Option[QueueItem] = {
@@ -294,5 +360,17 @@ object LogQueue {
     request.copyTo(response)
     response.function = MessageType.FUNCTION_RESPONSE
     response
+  }
+
+  /**
+   * Dummy ConsistentStore which implement a no-op `truncateAt` method. Calling any other method result raise an error.
+   */
+  private[log] object DummyTruncatableConsistentStore extends ConsistentStore {
+    def requiresConsistency(message: Message) = ???
+    def getLastTimestamp(ranges: Seq[TokenRange]) = ???
+    def setCurrentConsistentTimestamp(getCurrentConsistentTimestamp: (TokenRange) => Timestamp) = ???
+    def readTransactions(fromTime: Timestamp, toTime: Timestamp, ranges: Seq[TokenRange]) = ???
+    def writeTransaction(message: Message) = ???
+    def truncateAt(timestamp: Timestamp, token: Long) = {}
   }
 }
