@@ -113,6 +113,9 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
     case ackItem: QueueItem.Ack => ack(ackItem)
   }
 
+  // TODO: Implement this method
+  def truncateQueueItem(itemId: Timestamp) = {}
+
   /**
    * Creates a new LogQueueFeeder.QueueReader. This method is passed as a factory function to the
    * LogQueueFeeder constructor.

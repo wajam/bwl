@@ -34,12 +34,12 @@ class TestLogQueue extends FlatSpec {
 
       override def responseTimeout = 1000L
     }
-    val resource = new QueueResource((_, _) => None, (_) => member)
-    resource.registerTo(service)
-
     val priorities = List(Priority(1, weight = 66), Priority(2, weight = 33))
 
     val definition: QueueDefinition = QueueDefinition("name", (_) => mock[Future[QueueTask.Result]], priorities = priorities)
+
+    val resource = new QueueResource((_, _) => None, (_) => definition, (_) => member)
+    resource.registerTo(service)
 
     // Execute specified test with a log queue factory. The test can create multiple queue instances but must stop
     // using the previously created instance. All queue instances are backed by the same log files.

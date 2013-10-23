@@ -10,14 +10,12 @@ import com.wajam.spnl._
 import com.wajam.bwl.queue.QueueDefinition
 import com.wajam.nrv.data.MInt
 import com.wajam.commons.Logging
-import java.util.concurrent.TimeUnit
-import com.wajam.nrv.TimeoutException
 
-class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQueue: QueueFactory,
+class Bwl(serviceName: String = "bwl", val definitions: Iterable[QueueDefinition], protected val createQueue: QueueFactory,
           spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)
-    extends Service(name) with Logging {
+    extends Service(serviceName) with Logging {
 
-  private case class QueueWrapper(queue: Queue, task: Task) {
+  protected case class QueueWrapper(queue: Queue, task: Task) {
     def start() {
       registerAction(task.action.action)
       queue.start()
@@ -31,14 +29,20 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
     }
   }
 
-  private var queues: Map[(Long, String), QueueWrapper] = Map()
+  protected var queues: Map[(Long, String), QueueWrapper] = Map()
 
   applySupport(resolver = Some(new Resolver(tokenExtractor = Resolver.TOKEN_PARAM("token"))))
 
-  private val queueResource = new QueueResource(
+  protected val queueResource = new QueueResource(
     (token, name) => queues.get(token, name).map(_.queue),
+    (name) => definitionFor(name),
     token => resolveMembers(token, 1).head)
   queueResource.registerTo(this)
+
+  private val definitionsMap: Map[String, QueueDefinition] =
+    definitions.map(definition => definition.name -> definition).toMap
+
+  def definitionFor(queueName: String): QueueDefinition = definitionsMap(queueName)
 
   /**
    * Enqueue the specified task data and returns the task id if enqueued successfully .

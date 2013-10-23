@@ -18,7 +18,7 @@ class TestTaskItemReader extends FlatSpec {
 
   trait QueueService {
     val service = new Service("queue")
-    val resource = new QueueResource((_, _) => None, (_) => new ServiceMember(0, new LocalNode(Map("nrv" -> 34578))))
+    val resource = new QueueResource((_, _) => None, (_) => null, (_) => new ServiceMember(0, new LocalNode(Map("nrv" -> 34578))))
     resource.registerTo(service)
   }
 

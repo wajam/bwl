@@ -16,7 +16,8 @@ class QueueItemReader(service: Service, maxItemId: Timestamp, prioritySources: M
   def hasNext = priorityItems.valuesIterator.exists(_.hasNext)
 
   def next() = {
-    priorityItems.valuesIterator.collect { case itr if itr.hasNext => itr.peek }.reduce(QueueItem.Ordering.min)
+    val nextItr: PeekIterator[QueueItem] = priorityItems.valuesIterator.withFilter(_.hasNext).reduce(QueueItem.IteratorOrdering.min)
+    nextItr.next()
   }
 
   def close() = prioritySources.valuesIterator.foreach(_.close())
@@ -28,8 +29,4 @@ class QueueItemReader(service: Service, maxItemId: Timestamp, prioritySources: M
       msg => msg.isDefined && msg.get.timestamp <= maxTimestamp).flatten.flatMap(message2item(_, service))
     PeekIterator(items)
   }
-}
-
-object QueueItemReader {
-
 }

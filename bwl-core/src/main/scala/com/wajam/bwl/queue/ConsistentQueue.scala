@@ -8,4 +8,5 @@ trait ConsistentQueue extends Queue {
   def getLastQueueItemId: Option[Timestamp]
   def readQueueItems(fromItemId: Timestamp, toItemId: Timestamp): Iterator[QueueItem] with Closable
   def writeQueueItem(item: QueueItem)
+  def truncateQueueItem(itemId: Timestamp)
 }
