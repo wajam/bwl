@@ -22,35 +22,36 @@ class TestTaskItemReader extends FlatSpec {
     resource.registerTo(service)
   }
 
-  def toTask(id: Int): QueueItem = QueueItem.Task(id, id, id, id)
+  private def task(id: Int): QueueItem = QueueItem.Task(id, id, id, id)
 
-  def toSomeTaskMessage(taskId: Int): Option[InMessage] = Some(LogQueue.item2request(toTask(taskId)))
+  private def someTaskMessage(taskId: Int): Option[InMessage] = Some(LogQueue.item2request(task(taskId)))
 
-  def toSomeAckMessage(ackId: Long, taskId: Int): Option[InMessage] = Some(LogQueue.item2request(QueueItem.Ack(ackId, taskId)))
+  private def someAckMessage(ackId: Long, taskId: Int): Option[InMessage] = Some(
+    LogQueue.item2request(QueueItem.Ack(ackId, taskId, token = taskId)))
 
   "Reader" should "convert task request message to QueueItem.Task" in new QueueService {
-    val messages = Iterator(toSomeTaskMessage(1), toSomeTaskMessage(2))
+    val messages = Iterator(someTaskMessage(1), someTaskMessage(2))
     val reader = PriorityTaskItemReader(service, messages, Set())
-    reader.toList should be(List(Some(toTask(1)), Some(toTask(2))))
+    reader.toList should be(List(Some(task(1)), Some(task(2))))
   }
 
   it should "filter out processed tasks" in new QueueService {
-    val messages = Iterator(toSomeTaskMessage(1), toSomeTaskMessage(2), toSomeTaskMessage(3))
+    val messages = Iterator(someTaskMessage(1), someTaskMessage(2), someTaskMessage(3))
     val reader = PriorityTaskItemReader(service, messages, processed = Set(2L))
-    reader.toList should be(List(Some(toTask(1)), Some(toTask(3))))
+    reader.toList should be(List(Some(task(1)), Some(task(3))))
   }
 
   it should "skip ack messages" in new QueueService {
-    val messages = Iterator(toSomeTaskMessage(2), toSomeTaskMessage(3), toSomeAckMessage(4, taskId = 1))
+    val messages = Iterator(someTaskMessage(2), someTaskMessage(3), someAckMessage(4, taskId = 1))
     val reader = PriorityTaskItemReader(service, messages, Set())
-    reader.toList should be(List(Some(toTask(2)), Some(toTask(3))))
+    reader.toList should be(List(Some(task(2)), Some(task(3))))
   }
 
   it should "not filter out None" in new QueueService {
-    val messages = Iterator(None, toSomeTaskMessage(1), None, None, toSomeTaskMessage(2), toSomeTaskMessage(3))
+    val messages = Iterator(None, someTaskMessage(1), None, None, someTaskMessage(2), someTaskMessage(3))
     val reader = PriorityTaskItemReader(service, messages, Set())
-    reader.take(3).toList should be(List(None, Some(toTask(1)), None))
-    reader.toList should be(List(None, Some(toTask(2)), Some(toTask(3))))
+    reader.take(3).toList should be(List(None, Some(task(1)), None))
+    reader.toList should be(List(None, Some(task(2)), Some(task(3))))
   }
 
   it should "call adapted Iterator.close() when closed" in new QueueService with MockitoSugar {

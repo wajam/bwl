@@ -186,13 +186,9 @@ trait ConsistentBwl extends ConsistentStore with Startable {
   }
 
   private def ack2message(ackItem: QueueItem.Ack): Message = {
-
-    // TODO: Fix token. Must be added to QueueItem.Ack class
-    val token: Long = 0 // ackItem.token
-
-    val params: Map[String, MValue] = Map(TaskId -> ackItem.taskId.toString, TaskToken -> token.toString)
+    val params: Map[String, MValue] = Map(TaskId -> ackItem.taskId.toString, TaskToken -> ackItem.token.toString)
     val request = new InMessage(params)
-    request.token = token
+    request.token = ackItem.token
     request.timestamp = Some(ackItem.ackId)
     request.function = MessageType.FUNCTION_CALL
     request.serviceName = name

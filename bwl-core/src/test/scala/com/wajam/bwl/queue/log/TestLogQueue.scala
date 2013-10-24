@@ -21,7 +21,9 @@ import com.wajam.spnl.feeder.Feeder
 @RunWith(classOf[JUnitRunner])
 class TestLogQueue extends FlatSpec {
 
-  def toTask(id: Long, priority: Int = 1): QueueItem.Task = QueueItem.Task(id, id, priority, id)
+  private def task(taskId: Long, priority: Int = 1) = QueueItem.Task(taskId, token = taskId, priority, data = taskId)
+
+  private def ack(ackId: Long, taskId: Long) = QueueItem.Ack(ackId, taskId, token = taskId)
 
   trait QueueService extends MockitoSugar {
     val member = new ServiceMember(0, new LocalNode(Map("nrv" -> 34578)))
@@ -103,9 +105,9 @@ class TestLogQueue extends FlatSpec {
       queue1.stats.verifyEqualsTo(totalTasks = 0, pendingTasks = Nil)
 
       // Enqueue out of order
-      val t3 = queue1.enqueue(toTask(id = 3, priority = 1))
-      val t1 = queue1.enqueue(toTask(id = 1, priority = 1))
-      val t2 = queue1.enqueue(toTask(id = 2, priority = 1))
+      val t3 = queue1.enqueue(task(taskId = 3, priority = 1))
+      val t1 = queue1.enqueue(task(taskId = 1, priority = 1))
+      val t2 = queue1.enqueue(task(taskId = 2, priority = 1))
       waitForFeederData(queue1.feeder)
 
       // Verification after enqueue
@@ -123,7 +125,7 @@ class TestLogQueue extends FlatSpec {
       queue2.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = List(t1, t2, t3))
 
       // Ack first task (queue + feeder)
-      queue2.ack(QueueItem.Ack(4, taskId = t1.taskId))
+      queue2.ack(ack(4, taskId = t1.taskId.value))
       queue2.feeder.ack(t1.toFeederData)
       queue2.stats.verifyEqualsTo(totalTasks = 2, pendingTasks = List(t2, t3))
       queue2.stop()
