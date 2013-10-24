@@ -26,7 +26,7 @@ import LogQueue._
 class LogQueue(val token: Long, service: Service, val definition: QueueDefinition,
                recorderFactory: RecorderFactory)(implicit random: Random = Random) extends ConsistentQueue with Logging {
 
-  private var recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
+  private val recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
 
   // Must not read tasks from logs beyond this position when rebuilding the initial state (rebuild is lazy and per priority),
   // By default the max rebuild position is the last item present in the log at the time the queue is created.
@@ -93,19 +93,19 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
 
   def getLastQueueItemId = recorders.valuesIterator.flatMap(_.currentConsistentTimestamp).reduceOption(Ordering[Timestamp].max)
 
-  def readQueueItems(fromItemId: Timestamp, toItemId: Timestamp) = {
+  def readQueueItems(startItemId: Timestamp, endItemId: Timestamp) = {
 
     val sources = recorders.map {
       case (priority, recorder) => {
         val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
-        val initialTimestamp = Ordering[Timestamp].max(findStartTimestamp(txLog), fromItemId)
+        val initialTimestamp = Ordering[Timestamp].max(findStartTimestamp(txLog), startItemId)
         val itr = new TransactionLogReplicationIterator(recorder.member,
           initialTimestamp, txLog, recorder.currentConsistentTimestamp)
         (priority, itr)
       }
     }.toMap
 
-    new QueueItemReader(service, toItemId, sources)
+    new QueueItemReader(service, endItemId, sources)
   }
 
   def writeQueueItem(item: QueueItem) = item match {
@@ -113,8 +113,9 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
     case ackItem: QueueItem.Ack => ack(ackItem)
   }
 
-  // TODO: Implement this method
-  def truncateQueueItem(itemId: Timestamp) = {}
+  def truncateQueueItem(itemId: Timestamp) = {
+    // TODO: Implement this method.
+  }
 
   /**
    * Creates a new LogQueueFeeder.QueueReader. This method is passed as a factory function to the
@@ -276,7 +277,7 @@ object LogQueue {
 
     def memberFor(priority: Priority) = {
       val ranges = ResolvedServiceMember(service, token).ranges
-      ResolvedServiceMember(queueNameFor(priority), token, ranges) // TODO: Find a better solution to ovveride service name
+      ResolvedServiceMember(queueNameFor(priority), token, ranges) // TODO: Find a better solution to override service name
     }
 
     /**
@@ -347,7 +348,7 @@ object LogQueue {
   }
 
   /**
-   * Dummy ConsistentStore which implement a no-op `truncateAt` method. Calling any other method result raise an error.
+   * Dummy ConsistentStore which implement a no-op `truncateAt` method. Calling any other method raise an error.
    */
   private[log] object DummyTruncatableConsistentStore extends ConsistentStore {
     def requiresConsistency(message: Message) = ???

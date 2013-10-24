@@ -8,10 +8,15 @@ import com.wajam.nrv.service.Service
 import com.wajam.bwl.utils.PeekIterator
 import com.wajam.nrv.utils.timestamp.Timestamp
 
-// TODO: document this!!!
-class QueueItemReader(service: Service, maxItemId: Timestamp, prioritySources: Map[Int, ReplicationSourceIterator]) extends Iterator[QueueItem] with Closable {
+/**
+ * Multiplex the specified transaction log source iterators, one per priority, into a single log item iterators.
+ * Items are ordered by ascending item id.
+ */
+class QueueItemReader(service: Service, maxItemId: Timestamp, prioritySources: Map[Int, ReplicationSourceIterator])
+    extends Iterator[QueueItem] with Closable {
 
-  val priorityItems: Map[Int, PeekIterator[QueueItem]] = prioritySources.map(e => e._1 -> toPeekIterator(e._2))
+  private val priorityItems: Map[Int, PeekIterator[QueueItem]] =
+    prioritySources.map(entry => entry._1 -> messageSource2itemPeekIterator(entry._2))
 
   def hasNext = priorityItems.valuesIterator.exists(_.hasNext)
 
@@ -22,7 +27,7 @@ class QueueItemReader(service: Service, maxItemId: Timestamp, prioritySources: M
 
   def close() = prioritySources.valuesIterator.foreach(_.close())
 
-  def toPeekIterator(itr: ReplicationSourceIterator): PeekIterator[QueueItem] = {
+  private def messageSource2itemPeekIterator(itr: ReplicationSourceIterator): PeekIterator[QueueItem] = {
     implicit val ord = Ordering[Option[Timestamp]]
     val maxTimestamp = Some(maxItemId)
     val items: Iterator[QueueItem] = itr.takeWhile(

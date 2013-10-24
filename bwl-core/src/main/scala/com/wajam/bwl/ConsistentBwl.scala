@@ -19,7 +19,7 @@ trait ConsistentBwl extends ConsistentStore with Startable {
   private var replicaQueues: Map[(Long, String), Queue] = Map()
   private var initializedReplicas: Set[Long] = Set()
 
-  // Mapping between token ranges and service member to speedup reverse lookup.
+  // Mapping between token ranges and service member to speedup lookup.
   private var rangeMembers: Map[TokenRange, ServiceMember] = Map()
 
   private def updateRangeMemberCache() {
@@ -55,28 +55,29 @@ trait ConsistentBwl extends ConsistentStore with Startable {
    * Returns the greatest queue item id from all the consistent queues matching the specified service member token ranges.
    */
   def getLastTimestamp(ranges: Seq[TokenRange]) = {
-    val member = resolveMembers(range2token(ranges), 1).head
+    val member = memberFor(range2token(ranges))
     initializeMemberReplicaQueues(member)
     allConsistentQueuesFor(member).flatMap(_.getLastQueueItemId).reduceOption(Ordering[Timestamp].max)
   }
 
+  // TODO: Should we delay tasks beyond the service consistent timestamp?
   def setCurrentConsistentTimestamp(getCurrentConsistentTimestamp: (TokenRange) => Timestamp) = {
-    // We don't have any background job that must not be executed beyond the service current consistent timestamp.
-    // TODO: Should we delay tasks beyond the service consistent timestamp?
+    // Nothing to do here! We don't have any background job that must not be executed beyond the service
+    // current consistent timestamp.
   }
 
   /**
    * Returns the enqueue and ack messages in id ascending order from all the consistent queues matching the
    * specified service member token ranges and id ranges.
    */
-  def readTransactions(fromTime: Timestamp, toTime: Timestamp, ranges: Seq[TokenRange]) = {
+  def readTransactions(startTime: Timestamp, endTime: Timestamp, ranges: Seq[TokenRange]) = {
     val memberToken = range2token(ranges)
     val consistentQueues = queues.map { case (key, wrapper) => key -> wrapper.queue }.collect {
       case ((queueToken, _), queue: ConsistentQueue) if queueToken == memberToken => queue
     }
 
     val iterators: List[PeekIterator[QueueItem] with Closable] = consistentQueues.map(queue =>
-      ClosablePeekIterator(queue.readQueueItems(fromTime, toTime))).toList
+      ClosablePeekIterator(queue.readQueueItems(startTime, endTime))).toList
 
     new Iterator[Message] with Closable {
       def hasNext = iterators.exists(_.hasNext)
@@ -98,7 +99,7 @@ trait ConsistentBwl extends ConsistentStore with Startable {
     val params: ParamsAccessor = message
 
     val taskToken = params.param[Long](TaskToken)
-    val member = resolveMembers(taskToken, 1).head
+    val member = memberFor(taskToken)
     val queueName = params.param[String](QueueName)
 
     initializeMemberReplicaQueues(member)
@@ -110,14 +111,17 @@ trait ConsistentBwl extends ConsistentStore with Startable {
   }
 
   def truncateAt(timestamp: Timestamp, token: Long) = {
-    val member = resolveMembers(token, 1).head
+    val member = memberFor(token)
     initializeMemberReplicaQueues(member)
+
+    // There is no way to know in which queue the item to truncate is located. So call truncate on each possible queue.
     allConsistentQueuesFor(member).foreach(_.truncateQueueItem(timestamp))
   }
 
   override def start() = {
     super.start()
 
+    // TODO: Also update the cache when a shard is split (i.e. NewMemberAddedEvent)
     updateRangeMemberCache()
   }
 
@@ -127,17 +131,20 @@ trait ConsistentBwl extends ConsistentStore with Startable {
   }
 
   /**
-   * Ensure the replica consistent queues for the specified member are initialized or initialize them if needed.
+   * Ensure the replica consistent queues for the specified member are initialized or initialize them if not.
    */
   private def initializeMemberReplicaQueues(member: ServiceMember) {
     if (!initializedReplicas.contains(member.token)) {
       synchronized {
-        // TODO: Create only consistent queue once factory is in the queue definition
-        replicaQueues ++= definitions.map(definition => (member.token, definition.name) -> createQueue(member.token, definition, this))
+        // TODO: Create only consistent queues once factory is moved to the queue definition
+        replicaQueues ++= definitions.map(definition =>
+          (member.token, definition.name) -> createQueue(member.token, definition, this))
         initializedReplicas += member.token
       }
     }
   }
+
+  private def memberFor(token: Long): ServiceMember = resolveMembers(token, 1).head
 
   private def range2token(ranges: Iterable[TokenRange]): Long = rangeMembers(ranges.head).token
 

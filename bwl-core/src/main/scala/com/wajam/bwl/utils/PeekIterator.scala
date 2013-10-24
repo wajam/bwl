@@ -38,6 +38,9 @@ object ClosablePeekIterator {
   }
 }
 
+/**
+ * Ordering implementation to sort PeekIterator by peeked head value.
+ */
 class PeekIteratorOrdering[T](implicit ord: Ordering[T]) extends Ordering[PeekIterator[T]] {
   def compare(x: PeekIterator[T], y: PeekIterator[T]) = {
     ord.compare(x.peek, y.peek)
