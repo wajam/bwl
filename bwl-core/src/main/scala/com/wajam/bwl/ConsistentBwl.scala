@@ -118,7 +118,7 @@ trait ConsistentBwl extends ConsistentStore with Startable {
     allConsistentQueuesFor(member).foreach(_.truncateQueueItem(timestamp))
   }
 
-  override def start() = {
+  abstract override def start() = {
     super.start()
 
     // TODO: Also update the cache when a shard is split (i.e. NewMemberAddedEvent)
@@ -146,7 +146,12 @@ trait ConsistentBwl extends ConsistentStore with Startable {
 
   private def memberFor(token: Long): ServiceMember = resolveMembers(token, 1).head
 
-  private def range2token(ranges: Iterable[TokenRange]): Long = rangeMembers(ranges.head).token
+  private def range2token(ranges: Seq[TokenRange]): Long = {
+    val members = ranges.collect(rangeMembers)
+    val head = members.head
+    require(members.forall(_ == head))
+    head.token
+  }
 
   private def message2item(message: Message): QueueItem = {
     message.method match {

@@ -39,6 +39,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
 
   private val totalTaskCount = new AtomicInteger()
 
+  @volatile
   private var started = false
 
   def enqueue(taskItem: QueueItem.Task) = {
@@ -216,17 +217,17 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
 
   def start() {
     if (!started) {
-      started = true
       debug(s"Starting queue '$name'")
       recorders.valuesIterator.foreach(_.start())
+      started = true
     }
   }
 
   def stop() {
     if (started) {
+      started = false
       debug(s"Stopping queue '$name'")
       recorders.valuesIterator.foreach(_.kill())
-      started = false
     }
   }
 
@@ -349,6 +350,10 @@ object LogQueue {
 
   /**
    * Dummy ConsistentStore which implement a no-op `truncateAt` method. Calling any other method raise an error.
+   * Invoked if a transaction is incomplete in the logs (i.e. request is written but response is missing) when
+   * rewriting tail of the queue transaction log. Since the transaction log ARE the storage, there is nothing to
+   * truncate in the underlying non-existent store. The other methods are not called when rewriting the log tail and
+   * failing ensure awareness if they are in the future.
    */
   private[log] object DummyTruncatableConsistentStore extends ConsistentStore {
     def requiresConsistency(message: Message) = ???

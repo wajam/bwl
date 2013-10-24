@@ -11,7 +11,7 @@ import com.wajam.bwl.queue.QueueDefinition
 import com.wajam.nrv.data.MInt
 import com.wajam.commons.Logging
 
-class Bwl(serviceName: String = "bwl", val definitions: Iterable[QueueDefinition], protected val createQueue: QueueFactory,
+class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefinition], protected val createQueue: QueueFactory,
           spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)
     extends Service(serviceName) with Logging {
 
@@ -29,7 +29,9 @@ class Bwl(serviceName: String = "bwl", val definitions: Iterable[QueueDefinition
     }
   }
 
-  protected var queues: Map[(Long, String), QueueWrapper] = Map()
+  private var internalQueues: Map[(Long, String), QueueWrapper] = Map()
+
+  protected def queues: Map[(Long, String), QueueWrapper] = internalQueues
 
   applySupport(resolver = Some(new Resolver(tokenExtractor = Resolver.TOKEN_PARAM("token"))))
 
@@ -42,7 +44,7 @@ class Bwl(serviceName: String = "bwl", val definitions: Iterable[QueueDefinition
   private val definitionsMap: Map[String, QueueDefinition] =
     definitions.map(definition => definition.name -> definition).toMap
 
-  def definitionFor(queueName: String): QueueDefinition = definitionsMap(queueName)
+  protected def definitionFor(queueName: String): QueueDefinition = definitionsMap(queueName)
 
   /**
    * Enqueue the specified task data and returns the task id if enqueued successfully .
@@ -144,14 +146,14 @@ class Bwl(serviceName: String = "bwl", val definitions: Iterable[QueueDefinition
     // Build queues for each queue definition and local service member pair
     // TODO: Creates/deletes queues when service members goes Up/Down
     val localMembers = members.filter(m => cluster.isLocalNode(m.node)).toList
-    queues = definitions.flatMap(d => localMembers.map(m => (m.token, d.name) -> createQueueWrapper(m, d))).toMap
-    queues.valuesIterator.foreach(_.start())
+    internalQueues = definitions.flatMap(d => localMembers.map(m => (m.token, d.name) -> createQueueWrapper(m, d))).toMap
+    internalQueues.valuesIterator.foreach(_.start())
   }
 
   override def stop() {
     super.stop()
 
-    queues.valuesIterator.foreach(_.stop())
-    queues = Map()
+    internalQueues.valuesIterator.foreach(_.stop())
+    internalQueues = Map()
   }
 }

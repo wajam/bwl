@@ -44,7 +44,7 @@ trait BwlFixture extends CallbackFixture with MockitoSugar {
       val protocol = new NrvProtocol(cluster.localNode, 5000, 100)
       cluster.registerProtocol(protocol, default = true)
 
-      bwl = new Bwl(definitions = List(definition), createQueue = queueFactory.factory, spnl = new Spnl)
+      bwl = new Bwl("bwl", List(definition), queueFactory.factory, new Spnl)
       bwl.applySupport(responseTimeout = Some(3000))
       cluster.registerService(bwl)
       bwl.addMember(0, cluster.localNode)
