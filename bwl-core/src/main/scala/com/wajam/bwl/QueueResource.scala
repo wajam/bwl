@@ -66,8 +66,9 @@ class QueueResource(getQueue: => (Long, String) => Option[Queue], getDefinition:
   def message2ack(params: ParamsAccessor): QueueItem.Ack = {
     val taskId = params.param[Long](TaskId)
     val ackId: Timestamp = params.message.timestamp.getOrElse(timestampGenerator.nextId)
+    val taskToken = params.param[Long](TaskToken)
 
-    QueueItem.Ack(ackId, taskId)
+    QueueItem.Ack(ackId, taskId, taskToken)
   }
 }
 

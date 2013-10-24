@@ -19,15 +19,15 @@ import scala.util.Random
 @RunWith(classOf[JUnitRunner])
 class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
 
-  val dummyCallback: QueueTask.Callback = (_) => mock[Future[QueueTask.Result]]
+  private val dummyCallback: QueueTask.Callback = (_) => mock[Future[QueueTask.Result]]
 
-  def toTask(id: Long, priority: Int = 1): QueueItem.Task = QueueItem.Task(id, id, priority, id)
+  private def task(id: Long, priority: Int = 1): QueueItem.Task = QueueItem.Task(id, id, priority, id)
 
-  def toSomeTask(id: Long, priority: Int = 1): Option[QueueItem.Task] = Some(toTask(id, priority))
+  private def someTask(id: Long, priority: Int = 1): Option[QueueItem.Task] = Some(task(id, priority))
 
-  def toFeederData(id: Long, priority: Int = 1): FeederData = toTask(id, priority).toFeederData
+  private def feederData(id: Long, priority: Int = 1): FeederData = task(id, priority).toFeederData
 
-  def toSomeFeederData(id: Long, priority: Int = 1): Option[FeederData] = Some(toTask(id, priority).toFeederData)
+  private def someFeederData(id: Long, priority: Int = 1): Option[FeederData] = Some(task(id, priority).toFeederData)
 
   "Feeder" should "returns expected name" in {
     val feeder = new LogQueueFeeder(QueueDefinition("name", dummyCallback), (_, _) => mock[PriorityTaskItemReader])
@@ -37,36 +37,36 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
   it should "produce expected tasks" in {
     val mockReader = mock[PriorityTaskItemReader]
     when(mockReader.hasNext).thenReturn(true)
-    when(mockReader.next()).thenReturn(toSomeTask(1L), None, toSomeTask(2L), toSomeTask(3L), None)
+    when(mockReader.next()).thenReturn(someTask(1L), None, someTask(2L), someTask(3L), None)
     when(mockReader.delayedTasks).thenReturn(Nil)
     val feeder = new LogQueueFeeder(QueueDefinition("name", dummyCallback), (_, _) => mockReader)
     val context = TaskContext()
     feeder.init(context)
 
     // Verify peek
-    feeder.peek() should be(toSomeFeederData(1L))
-    feeder.peek() should be(toSomeFeederData(1L))
+    feeder.peek() should be(someFeederData(1L))
+    feeder.peek() should be(someFeederData(1L))
     feeder.pendingTasks.toList should be(List())
     feeder.pendingTaskPriorityFor(1L) should be(None)
 
     // Verify feeder produced data and state
-    feeder.take(6).toList should be(List(toSomeFeederData(1L), None, toSomeFeederData(2L), toSomeFeederData(3L), None, None))
-    feeder.pendingTasks.toList should be(List(toTask(1L), toTask(2L), toTask(3L)))
+    feeder.take(6).toList should be(List(someFeederData(1L), None, someFeederData(2L), someFeederData(3L), None, None))
+    feeder.pendingTasks.toList should be(List(task(1L), task(2L), task(3L)))
     feeder.pendingTaskPriorityFor(1L) should be(Some(1))
 
     // Verify feeder state after acknowledging the first task
-    feeder.ack(toFeederData(1L))
-    feeder.pendingTasks.toList should be(List(toTask(2L), toTask(3L)))
+    feeder.ack(feederData(1L))
+    feeder.pendingTasks.toList should be(List(task(2L), task(3L)))
     feeder.pendingTaskPriorityFor(1L) should be(None)
     context.data("1") should be(2L) // priority position in task context
 
     // Verify feeder state after acknowledging the last task
-    feeder.ack(toFeederData(3L))
-    feeder.pendingTasks.toList should be(List(toTask(2L)))
+    feeder.ack(feederData(3L))
+    feeder.pendingTasks.toList should be(List(task(2L)))
     context.data("1") should be(2L) // priority position in task context
 
     // Verify feeder state after acknowledging the middle task
-    feeder.ack(toFeederData(2L))
+    feeder.ack(feederData(2L))
     feeder.pendingTasks.toList should be(List())
     context.data("1") should be(3L) // priority position in task context
   }
@@ -126,8 +126,8 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
 
   it should "returns expected delayed tasks" in {
     val priorities = List(Priority(1, 1), Priority(2, 2))
-    val priority1DelayedTasks = List(toTask(id = 1, priority = 1), toTask(id = 3, priority = 1))
-    val priority2DelayedTasks = List(toTask(id = 2, priority = 2))
+    val priority1DelayedTasks = List(task(id = 1, priority = 1), task(id = 3, priority = 1))
+    val priority2DelayedTasks = List(task(id = 2, priority = 2))
 
     val mockReader1 = mock[PriorityTaskItemReader]
     when(mockReader1.delayedTasks).thenReturn(priority1DelayedTasks)

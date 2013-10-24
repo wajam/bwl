@@ -315,7 +315,8 @@ object LogQueue {
       case MessageType.FUNCTION_CALL if message.path == "/enqueue" => {
         message.timestamp.map(QueueItem.Task(_, message.token, message.param[Int](TaskPriority), message.getData[Any]))
       }
-      case MessageType.FUNCTION_CALL if message.path == "/ack" => message.timestamp.map(QueueItem.Ack(_, message.param[Long](TaskId)))
+      case MessageType.FUNCTION_CALL if message.path == "/ack" => message.timestamp.map(QueueItem.Ack(_,
+        taskId = message.param[Long](TaskId), token = message.token))
       case _ => throw new IllegalStateException(s"Unsupported message path: ${message.path}")
     }
   }
@@ -326,7 +327,7 @@ object LogQueue {
         val params = Iterable[(String, MValue)](TaskPriority -> taskItem.priority)
         createSyntheticRequest(taskItem.taskId, taskItem.token, "/enqueue", params, taskItem.data)
       }
-      case ackItem: QueueItem.Ack => createSyntheticRequest(ackItem.ackId, -1, "/ack")
+      case ackItem: QueueItem.Ack => createSyntheticRequest(ackItem.ackId, ackItem.token, "/ack")
     }
   }
 
