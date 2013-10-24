@@ -9,25 +9,25 @@ import com.wajam.commons.Closable
 /**
  * Readers which returns unprocessed tasks
  */
-trait LogQueueReader extends Iterator[Option[QueueItem.Task]] with Closable {
+trait PriorityTaskItemReader extends Iterator[Option[QueueItem.Task]] with Closable {
   /**
    * Returns delayed task items ordered from the oldest to the newest tasks
    */
   def delayedTasks: Iterable[QueueItem.Task]
 }
 
-object LogQueueReader {
+object PriorityTaskItemReader {
   /**
    * Creates a reader which returns only unprocessed tasks. Tasks present in the `processed` set are skip and the set updated.
    * This set is initialized by reading the logs to the end before creating this reader.
    */
   def apply(service: Service, itr: Iterator[Option[Message]] with Closable,
-            processed: Set[Timestamp]): LogQueueReader = {
-    new InternalLogQueueReader(service, itr, processed)
+            processed: Set[Timestamp]): PriorityTaskItemReader = {
+    new InternalPriorityTaskItemReader(service, itr, processed)
   }
 
-  private class InternalLogQueueReader(service: Service, itr: Iterator[Option[Message]] with Closable,
-                                       var processed: Set[Timestamp]) extends LogQueueReader {
+  private class InternalPriorityTaskItemReader(service: Service, itr: Iterator[Option[Message]] with Closable,
+                                               var processed: Set[Timestamp]) extends PriorityTaskItemReader {
     import LogQueue.message2item
 
     val taskItems: Iterator[Option[QueueItem.Task]] = itr.map {

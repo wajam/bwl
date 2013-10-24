@@ -44,8 +44,8 @@ trait BwlFixture extends CallbackFixture with MockitoSugar {
       val protocol = new NrvProtocol(cluster.localNode, 5000, 100)
       cluster.registerProtocol(protocol, default = true)
 
-      bwl = new Bwl(definitions = List(definition), createQueue = queueFactory.factory, spnl = new Spnl)
-      bwl.applySupport(responseTimeout = Some(2000))
+      bwl = new Bwl("bwl", List(definition), queueFactory.factory, new Spnl)
+      bwl.applySupport(responseTimeout = Some(3000))
       cluster.registerService(bwl)
       bwl.addMember(0, cluster.localNode)
 
@@ -198,8 +198,10 @@ class TestBwl extends FunSuite {
       import ExecutionContext.Implicits.global
 
       new OkCallbackFixture with BwlFixture with MultipleQueueFixture {}.runWithFixture((f) => {
-        val enqueued = f.definition.priorities.flatMap(p => 1.to(200).map(i =>
-          f.bwl.enqueue(i, f.definition.name, Map("p" -> p.value, "i" -> i), Some(p.value))))
+        val enqueued = f.definition.priorities.flatMap(p => 1.to(200).map(i => {
+          f.bwl.enqueue(i, f.definition.name, Map("p" -> p.value, "i" -> i), Some(p.value))
+        }))
+
         Await.result(Future.sequence(enqueued), 5.seconds)
 
         val dataCaptor = ArgumentCaptor.forClass(classOf[Map[String, Any]])
@@ -216,10 +218,10 @@ class TestBwl extends FunSuite {
 
   }
 
-  testsFor(singlePriorityQueue(memoryQueueFactory))
   testsFor(multiplePrioritiesQueue(memoryQueueFactory))
-  testsFor(singlePriorityQueue(persistentQueueFactory))
+  testsFor(singlePriorityQueue(memoryQueueFactory))
   testsFor(multiplePrioritiesQueue(persistentQueueFactory))
+  testsFor(singlePriorityQueue(persistentQueueFactory))
 
   test("ok callback should BE akcnowledged") {
     implicit val spyQueueFactory = new SpyQueueFactory(memoryQueueFactory)

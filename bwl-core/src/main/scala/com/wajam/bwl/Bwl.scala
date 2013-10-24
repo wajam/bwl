@@ -10,14 +10,12 @@ import com.wajam.spnl._
 import com.wajam.bwl.queue.QueueDefinition
 import com.wajam.nrv.data.MInt
 import com.wajam.commons.Logging
-import java.util.concurrent.TimeUnit
-import com.wajam.nrv.TimeoutException
 
-class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQueue: QueueFactory,
+class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefinition], protected val createQueue: QueueFactory,
           spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)
-    extends Service(name) with Logging {
+    extends Service(serviceName) with Logging {
 
-  private case class QueueWrapper(queue: Queue, task: Task) {
+  protected case class QueueWrapper(queue: Queue, task: Task) {
     def start() {
       registerAction(task.action.action)
       queue.start()
@@ -31,14 +29,22 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
     }
   }
 
-  private var queues: Map[(Long, String), QueueWrapper] = Map()
+  private var internalQueues: Map[(Long, String), QueueWrapper] = Map()
+
+  protected def queues: Map[(Long, String), QueueWrapper] = internalQueues
 
   applySupport(resolver = Some(new Resolver(tokenExtractor = Resolver.TOKEN_PARAM("token"))))
 
-  private val queueResource = new QueueResource(
+  protected val queueResource = new QueueResource(
     (token, name) => queues.get(token, name).map(_.queue),
+    (name) => definitionFor(name),
     token => resolveMembers(token, 1).head)
   queueResource.registerTo(this)
+
+  private val definitionsMap: Map[String, QueueDefinition] =
+    definitions.map(definition => definition.name -> definition).toMap
+
+  protected def definitionFor(queueName: String): QueueDefinition = definitionsMap(queueName)
 
   /**
    * Enqueue the specified task data and returns the task id if enqueued successfully .
@@ -104,7 +110,7 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
 
     def executeIfCallbackNotExpired(function: => Any) {
       val elapsedTime = System.currentTimeMillis() - startTime
-      debug(s"'Task ${definition.name}:$priority:$taskId' callback elapsedTime: $elapsedTime")
+      trace(s"'Task ${definition.name}:$priority:$taskId' callback elapsedTime: $elapsedTime")
       if (elapsedTime < callbackTimeout) {
         function
       } else {
@@ -140,14 +146,14 @@ class Bwl(name: String = "bwl", definitions: Iterable[QueueDefinition], createQu
     // Build queues for each queue definition and local service member pair
     // TODO: Creates/deletes queues when service members goes Up/Down
     val localMembers = members.filter(m => cluster.isLocalNode(m.node)).toList
-    queues = definitions.flatMap(d => localMembers.map(m => (m.token, d.name) -> createQueueWrapper(m, d))).toMap
-    queues.valuesIterator.foreach(_.start())
+    internalQueues = definitions.flatMap(d => localMembers.map(m => (m.token, d.name) -> createQueueWrapper(m, d))).toMap
+    internalQueues.valuesIterator.foreach(_.start())
   }
 
   override def stop() {
     super.stop()
 
-    queues.valuesIterator.foreach(_.stop())
-    queues = Map()
+    internalQueues.valuesIterator.foreach(_.stop())
+    internalQueues = Map()
   }
 }
