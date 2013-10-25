@@ -17,13 +17,13 @@ import org.scalatest.matchers.ShouldMatchers._
 import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
 import com.wajam.spnl.feeder.Feeder
+import com.wajam.nrv.utils.timestamp.Timestamp
+import com.wajam.commons.Closable.using
 
 @RunWith(classOf[JUnitRunner])
 class TestLogQueue extends FlatSpec {
 
-  private def task(taskId: Long, priority: Int = 1) = QueueItem.Task(taskId, token = taskId, priority, data = taskId)
-
-  private def ack(ackId: Long, taskId: Long) = QueueItem.Ack(ackId, taskId, token = taskId)
+  private def task(taskId: Long, priority: Int = 1) = QueueItem.Task(token = taskId, priority, taskId, data = taskId)
 
   trait QueueService extends MockitoSugar {
     val member = new ServiceMember(0, new LocalNode(Map("nrv" -> 34578)))
@@ -45,12 +45,12 @@ class TestLogQueue extends FlatSpec {
 
     // Execute specified test with a log queue factory. The test can create multiple queue instances but must stop
     // using the previously created instance. All queue instances are backed by the same log files.
-    def withQueueFactory(test: (() => Queue) => Any) {
+    def withQueueFactory(test: (() => ConsistentQueue) => Any) {
       var queues: List[Queue] = Nil
       val dataDir = Files.createTempDirectory("TestLogQueue").toFile
       try {
 
-        def createQueue: Queue = {
+        def createQueue: ConsistentQueue = {
           val queue = LogQueue.create(dataDir)(token = 0, definition, service)
           queues = queue :: queues
           queue.start()
@@ -105,9 +105,9 @@ class TestLogQueue extends FlatSpec {
       queue1.stats.verifyEqualsTo(totalTasks = 0, pendingTasks = Nil)
 
       // Enqueue out of order
-      val t3 = queue1.enqueue(task(taskId = 3, priority = 1))
-      val t1 = queue1.enqueue(task(taskId = 1, priority = 1))
-      val t2 = queue1.enqueue(task(taskId = 2, priority = 1))
+      val t3 = queue1.enqueue(task(taskId = 3L, priority = 1))
+      val t1 = queue1.enqueue(task(taskId = 1L, priority = 1))
+      val t2 = queue1.enqueue(task(taskId = 2L, priority = 1))
       waitForFeederData(queue1.feeder)
 
       // Verification after enqueue
@@ -125,7 +125,7 @@ class TestLogQueue extends FlatSpec {
       queue2.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = List(t1, t2, t3))
 
       // Ack first task (queue + feeder)
-      queue2.ack(ack(4, taskId = t1.taskId.value))
+      queue2.ack(t1.toAck(ackId = 4L))
       queue2.feeder.ack(t1.toFeederData)
       queue2.stats.verifyEqualsTo(totalTasks = 2, pendingTasks = List(t2, t3))
       queue2.stop()
@@ -139,4 +139,83 @@ class TestLogQueue extends FlatSpec {
       queue3.stats.verifyEqualsTo(totalTasks = 2, pendingTasks = List(t2, t3))
     })
   }
+
+  it should "return last queue item identifier" in new QueueService {
+    withQueueFactory(createQueue => {
+      val queue1 = createQueue()
+
+      queue1.getLastQueueItemId should be(None)
+
+      queue1.enqueue(task(taskId = 3, priority = 1))
+      queue1.enqueue(task(taskId = 1, priority = 2))
+      queue1.enqueue(task(taskId = 4, priority = 2))
+      queue1.enqueue(task(taskId = 5, priority = 1))
+      queue1.enqueue(task(taskId = 2, priority = 1))
+      waitForFeederData(queue1.feeder)
+
+      queue1.getLastQueueItemId should be(Some(Timestamp(5L)))
+      queue1.stop()
+
+      val queue2 = createQueue()
+      queue2.getLastQueueItemId should be(Some(Timestamp(5L)))
+    })
+  }
+
+  ignore should "read queue items ordered by id from all priorities" in new QueueService {
+    withQueueFactory(createQueue => {
+      val queue1 = createQueue()
+
+      val t3 = queue1.enqueue(task(taskId = 3, priority = 1))
+      val t1 = queue1.enqueue(task(taskId = 1, priority = 2))
+      val t4 = queue1.enqueue(task(taskId = 4, priority = 2))
+      val t2 = queue1.enqueue(task(taskId = 2, priority = 1))
+      waitForFeederData(queue1.feeder)
+      queue1.feeder.take(20).toList // Load all items with feeder before acknowledging them
+
+      val a8_t2 = t2.toAck(8)
+      val a5_t1 = t1.toAck(5)
+      val a7_t3 = t3.toAck(7)
+      val a6_t4 = t4.toAck(6)
+      waitForFeederData(queue1.feeder)
+
+      val readItems = using(queue1.readQueueItems(startItemId = t3.taskId, endItemId = a7_t3.ackId)) { reader =>
+        reader.toList
+      }
+      readItems should be(List(t1, t2, t3, t4, a5_t1, a6_t4, a7_t3, a8_t2))
+    })
+  }
+
+  ignore should "write queue items" in new QueueService {
+    withQueueFactory(createQueue => {
+      val queue1 = createQueue()
+
+      val t1 = task(taskId = 1, priority = 1)
+      val t2 = task(taskId = 2, priority = 1)
+      val t3 = task(taskId = 3, priority = 2)
+      val t4 = task(taskId = 4, priority = 1)
+      val a5_t1 = t1.toAck(5)
+      val a6_t4 = t4.toAck(6)
+      val a7_t3 = t3.toAck(7)
+      val a8_t2 = t2.toAck(8)
+
+      queue1.writeQueueItem(t1)
+      queue1.writeQueueItem(t2)
+      queue1.writeQueueItem(t3)
+      queue1.writeQueueItem(t4)
+      queue1.writeQueueItem(a5_t1)
+      queue1.writeQueueItem(a6_t4)
+      queue1.writeQueueItem(a7_t3)
+      queue1.writeQueueItem(a8_t2)
+
+      val readItems = using(queue1.readQueueItems(startItemId = t3.taskId, endItemId = a7_t3.ackId)) { reader =>
+        reader.toList
+      }
+      readItems should be(List(t1, t2, t3, t4, a5_t1, a6_t4, a7_t3, a8_t2))
+    })
+  }
+
+  it should "rewrite log tail if not properly finalized" in {
+
+  }
+
 }

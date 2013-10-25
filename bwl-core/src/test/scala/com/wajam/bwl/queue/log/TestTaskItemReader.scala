@@ -22,12 +22,12 @@ class TestTaskItemReader extends FlatSpec {
     resource.registerTo(service)
   }
 
-  private def task(id: Int): QueueItem = QueueItem.Task(id, id, id, id)
+  private def task(id: Int): QueueItem = QueueItem.Task(token = id, priority = id, id, data = id)
 
   private def someTaskMessage(taskId: Int): Option[InMessage] = Some(LogQueue.item2request(task(taskId)))
 
   private def someAckMessage(ackId: Long, taskId: Int): Option[InMessage] = Some(
-    LogQueue.item2request(QueueItem.Ack(ackId, taskId, token = taskId)))
+    LogQueue.item2request(QueueItem.Ack(token = taskId, priority = taskId, ackId, taskId)))
 
   "Reader" should "convert task request message to QueueItem.Task" in new QueueService {
     val messages = Iterator(someTaskMessage(1), someTaskMessage(2))

@@ -76,14 +76,16 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   def ack(ackItem: QueueItem.Ack) = {
     requireStarted()
 
-    feeder.pendingTaskPriorityFor(ackItem.taskId).flatMap(priority => recorders.get(priority)) match {
+    recorders.get(ackItem.priority) match {
       case Some(recorder) => {
         val request = item2request(ackItem)
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
-        totalTaskCount.decrementAndGet()
+        if (feeder.isPending(ackItem.taskId)) {
+          totalTaskCount.decrementAndGet()
+        }
       }
-      case None => throw new IllegalArgumentException(s"Cannot acknowledge unknown task ${ackItem.taskId} for queue '$name'")
+      case None => throw new IllegalArgumentException(s"Queue '$name' unknown priority ${ackItem.priority}")
     }
     ackItem
   }
@@ -257,7 +259,7 @@ object LogQueue {
    * Creates a new LogQueue. This factory method is usable as [[com.wajam.bwl.queue.Queue.QueueFactory]] with the
    * Bwl service
    */
-  def create(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000)(token: Long, definition: QueueDefinition, service: Service)(implicit random: Random = Random): Queue = {
+  def create(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000)(token: Long, definition: QueueDefinition, service: Service)(implicit random: Random = Random): ConsistentQueue = {
 
     Logger.debug(s"Create log queue '${definition.name}'")
 
@@ -313,10 +315,10 @@ object LogQueue {
 
     message.function match {
       case MessageType.FUNCTION_CALL if message.path == "/enqueue" => {
-        message.timestamp.map(QueueItem.Task(_, message.token, message.param[Int](TaskPriority), message.getData[Any]))
+        message.timestamp.map(QueueItem.Task(message.token, message.param[Int](TaskPriority), _, message.getData[Any]))
       }
-      case MessageType.FUNCTION_CALL if message.path == "/ack" => message.timestamp.map(QueueItem.Ack(_,
-        taskId = message.param[Long](TaskId), token = message.token))
+      case MessageType.FUNCTION_CALL if message.path == "/ack" => message.timestamp.map(QueueItem.Ack(message.token,
+        message.param[Int](TaskPriority), _, taskId = message.param[Long](TaskId)))
       case _ => throw new IllegalStateException(s"Unsupported message path: ${message.path}")
     }
   }
@@ -324,19 +326,18 @@ object LogQueue {
   private[log] def item2request(item: QueueItem): InMessage = {
     item match {
       case taskItem: QueueItem.Task => {
-        val params = Iterable[(String, MValue)](TaskPriority -> taskItem.priority)
-        createSyntheticRequest(taskItem.taskId, taskItem.token, "/enqueue", params, taskItem.data)
+        createSyntheticRequest(taskItem.taskId, taskItem.taskId, taskItem, "/enqueue", taskItem.data)
       }
-      case ackItem: QueueItem.Ack => createSyntheticRequest(ackItem.ackId, ackItem.token, "/ack")
+      case ackItem: QueueItem.Ack => createSyntheticRequest(ackItem.ackId, ackItem.taskId, ackItem, "/ack")
     }
   }
 
-  private[log] def createSyntheticRequest(taskId: Timestamp, taskToken: Long, path: String,
-                                          params: Iterable[(String, MValue)] = Nil, data: Any = null): InMessage = {
-    val extraParams = Iterable[(String, MValue)](TaskId -> taskId.value, TaskToken -> taskToken)
-    val request = new InMessage(params ++ extraParams, data = data)
-    request.token = taskToken
-    request.timestamp = Some(taskId)
+  private[log] def createSyntheticRequest(itemId: Timestamp, taskId: Timestamp, item: QueueItem, path: String,
+                                          data: Any = null): InMessage = {
+    val params = Iterable[(String, MValue)](TaskId -> taskId.value, TaskToken -> item.token, TaskPriority -> item.priority)
+    val request = new InMessage(params, data = data)
+    request.token = item.token
+    request.timestamp = Some(itemId)
     request.function = MessageType.FUNCTION_CALL
     request.path = path
     request

@@ -21,7 +21,7 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
 
   private val dummyCallback: QueueTask.Callback = (_) => mock[Future[QueueTask.Result]]
 
-  private def task(id: Long, priority: Int = 1): QueueItem.Task = QueueItem.Task(id, id, priority, id)
+  private def task(id: Long, priority: Int = 1): QueueItem.Task = QueueItem.Task(token = id, priority, id, data = id)
 
   private def someTask(id: Long, priority: Int = 1): Option[QueueItem.Task] = Some(task(id, priority))
 
@@ -47,17 +47,17 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
     feeder.peek() should be(someFeederData(1L))
     feeder.peek() should be(someFeederData(1L))
     feeder.pendingTasks.toList should be(List())
-    feeder.pendingTaskPriorityFor(1L) should be(None)
+    feeder.isPending(1L) should be(false)
 
     // Verify feeder produced data and state
     feeder.take(6).toList should be(List(someFeederData(1L), None, someFeederData(2L), someFeederData(3L), None, None))
     feeder.pendingTasks.toList should be(List(task(1L), task(2L), task(3L)))
-    feeder.pendingTaskPriorityFor(1L) should be(Some(1))
+    feeder.isPending(1L) should be(true)
 
     // Verify feeder state after acknowledging the first task
     feeder.ack(feederData(1L))
     feeder.pendingTasks.toList should be(List(task(2L), task(3L)))
-    feeder.pendingTaskPriorityFor(1L) should be(None)
+    feeder.isPending(1L) should be(false)
     context.data("1") should be(2L) // priority position in task context
 
     // Verify feeder state after acknowledging the last task
