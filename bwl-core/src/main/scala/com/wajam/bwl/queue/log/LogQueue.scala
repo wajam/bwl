@@ -355,10 +355,13 @@ object LogQueue {
 
     message.function match {
       case MessageType.FUNCTION_CALL if message.path == "/enqueue" => {
-        message.timestamp.map(QueueItem.Task(message.token, message.param[Int](TaskPriority), _, message.getData[Any]))
+        message.timestamp.map(QueueItem.Task(message.param[String](QueueName), message.token,
+          message.param[Int](TaskPriority), _, message.getData[Any]))
       }
-      case MessageType.FUNCTION_CALL if message.path == "/ack" => message.timestamp.map(QueueItem.Ack(message.token,
-        message.param[Int](TaskPriority), _, taskId = message.param[Long](TaskId)))
+      case MessageType.FUNCTION_CALL if message.path == "/ack" => {
+        message.timestamp.map(QueueItem.Ack(message.param[String](QueueName), message.token,
+          message.param[Int](TaskPriority), _, taskId = message.param[Long](TaskId)))
+      }
       case _ => throw new IllegalStateException(s"Unsupported message path: ${message.path}")
     }
   }
@@ -374,7 +377,8 @@ object LogQueue {
 
   private[log] def createSyntheticRequest(itemId: Timestamp, taskId: Timestamp, item: QueueItem, path: String,
                                           data: Any = null): InMessage = {
-    val params = Iterable[(String, MValue)](TaskId -> taskId.value, TaskToken -> item.token, TaskPriority -> item.priority)
+    val params = Iterable[(String, MValue)](QueueName -> item.name, TaskId -> taskId.value, TaskToken -> item.token,
+      TaskPriority -> item.priority)
     val request = new InMessage(params, data = data)
     request.token = item.token
     request.timestamp = Some(itemId)

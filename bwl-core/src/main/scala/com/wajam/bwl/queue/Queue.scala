@@ -21,19 +21,20 @@ case class QueueDefinition(name: String, callback: QueueTask.Callback, taskConte
 sealed trait QueueItem {
   def token: Long
   def priority: Int
+  def name: String
 }
 
 object QueueItem {
 
-  case class Task(token: Long, priority: Int, taskId: Timestamp, data: Any) extends QueueItem {
+  case class Task(name: String, token: Long, priority: Int, taskId: Timestamp, data: Any) extends QueueItem {
     def toFeederData: FeederData = {
       Map("token" -> token, "id" -> taskId.value, "priority" -> priority, "data" -> data)
     }
 
-    def toAck(ackId: Timestamp) = Ack(token, priority, ackId, taskId)
+    def toAck(ackId: Timestamp) = Ack(name, token, priority, ackId, taskId)
   }
 
-  case class Ack(token: Long, priority: Int, ackId: Timestamp, taskId: Timestamp) extends QueueItem
+  case class Ack(name: String, token: Long, priority: Int, ackId: Timestamp, taskId: Timestamp) extends QueueItem
 
   implicit val Ordering = new Ordering[QueueItem] {
     def compare(x: QueueItem, y: QueueItem) = idFor(x).compareTo(idFor(y))

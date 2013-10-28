@@ -23,7 +23,7 @@ import com.wajam.commons.Closable.using
 @RunWith(classOf[JUnitRunner])
 class TestLogQueue extends FlatSpec {
 
-  private def task(taskId: Long, priority: Int = 1) = QueueItem.Task(token = taskId, priority, taskId, data = taskId)
+  private def task(taskId: Long, priority: Int = 1) = QueueItem.Task("name", token = taskId, priority, taskId, data = taskId)
 
   trait QueueService extends MockitoSugar {
     val member = new ServiceMember(0, new LocalNode(Map("nrv" -> 34578)))
@@ -264,7 +264,6 @@ class TestLogQueue extends FlatSpec {
       queue1.writeQueueItem(t2)
       queue1.writeQueueItem(t3)
       queue1.writeQueueItem(t4)
-      waitForFeederData(queue1.feeder)
       queue1.writeQueueItem(a5_t1)
       queue1.writeQueueItem(a6_t4)
       queue1.writeQueueItem(a7_t3)

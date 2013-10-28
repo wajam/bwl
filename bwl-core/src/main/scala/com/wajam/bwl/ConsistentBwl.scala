@@ -172,9 +172,9 @@ trait ConsistentBwl extends ConsistentStore with Startable {
     }
   }
 
-  private def task2message(taskItem: QueueItem.Task): Message = {
-    val params: Map[String, MValue] =
-      Map(TaskId -> taskItem.taskId.toString, TaskToken -> taskItem.token.toString, TaskPriority -> taskItem.priority)
+  def task2message(taskItem: QueueItem.Task): Message = {
+    val params: Map[String, MValue] = Map(QueueName -> taskItem.name, TaskToken -> taskItem.token.toString,
+      TaskPriority -> taskItem.priority, TaskId -> taskItem.taskId.toString)
     val request = new InMessage(params, data = taskItem.data)
     request.token = taskItem.token
     request.timestamp = Some(taskItem.taskId)
@@ -185,8 +185,9 @@ trait ConsistentBwl extends ConsistentStore with Startable {
     request
   }
 
-  private def ack2message(ackItem: QueueItem.Ack): Message = {
-    val params: Map[String, MValue] = Map(TaskId -> ackItem.taskId.toString, TaskToken -> ackItem.token.toString)
+  def ack2message(ackItem: QueueItem.Ack): Message = {
+    val params: Map[String, MValue] = Map(QueueName -> ackItem.name, TaskToken -> ackItem.token.toString,
+      TaskPriority -> ackItem.priority, TaskId -> ackItem.taskId.toString)
     val request = new InMessage(params)
     request.token = ackItem.token
     request.timestamp = Some(ackItem.ackId)
