@@ -9,7 +9,7 @@ import java.nio.file.{ Files, Paths }
 import com.wajam.nrv.consistency._
 import com.wajam.nrv.service.{ TokenRange, Service }
 import com.wajam.nrv.consistency.log.{ TimestampedRecord, FileTransactionLog }
-import com.wajam.nrv.consistency.replication.TransactionLogReplicationIterator
+import com.wajam.nrv.consistency.replication.{ ReplicationSourceIterator, TransactionLogReplicationIterator }
 import com.wajam.bwl.QueueResource._
 import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
@@ -101,9 +101,49 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
     val sources = recorders.map {
       case (priority, recorder) => {
         val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
-        val initialTimestamp = Ordering[Timestamp].max(findStartTimestamp(txLog), startItemId)
-        val itr = new TransactionLogReplicationIterator(recorder.member,
-          initialTimestamp, txLog, recorder.currentConsistentTimestamp)
+        val itr = if (txLog.getLogFiles.isEmpty) {
+          // Empty log
+          new ReplicationSourceIterator {
+            val start = startItemId
+            val end = Some(endItemId)
+
+            def hasNext = false
+
+            def next() = throw new NotImplementedError
+
+            def close() = {}
+          }
+        } else {
+          // The startItemId is may or may not exist in the priority log. The following code ensure that we start
+          // reading from an existing id prior startItemId.
+          val initialTimestamp = txLog.guessLogFile(startItemId).map(file => txLog.getIndexFromName(file.getName)) match {
+            case Some(Index(_, Some(consistentTimestamp))) => {
+              consistentTimestamp
+            }
+            case _ => {
+              findStartTimestamp(txLog)
+            }
+          }
+
+          // Filter out items prior startItemId
+          new ReplicationSourceIterator {
+            val start = startItemId
+            val end = Some(endItemId)
+            val source = new TransactionLogReplicationIterator(recorder.member,
+              initialTimestamp, txLog, recorder.currentConsistentTimestamp)
+            val filteredSource = source.filter {
+              case Some(msg) => msg.timestamp.get >= startItemId
+              case None => true
+            }
+
+            def hasNext = filteredSource.hasNext
+
+            def next() = filteredSource.next()
+
+            def close() = source.close()
+          }
+        }
+
         (priority, itr)
       }
     }.toMap

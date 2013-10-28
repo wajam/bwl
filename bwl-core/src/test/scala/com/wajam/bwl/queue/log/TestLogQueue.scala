@@ -146,11 +146,11 @@ class TestLogQueue extends FlatSpec {
 
       queue1.getLastQueueItemId should be(None)
 
-      queue1.enqueue(task(taskId = 3, priority = 1))
-      queue1.enqueue(task(taskId = 1, priority = 2))
-      queue1.enqueue(task(taskId = 4, priority = 2))
-      queue1.enqueue(task(taskId = 5, priority = 1))
-      queue1.enqueue(task(taskId = 2, priority = 1))
+      queue1.enqueue(task(taskId = 3L, priority = 1))
+      queue1.enqueue(task(taskId = 1L, priority = 2))
+      queue1.enqueue(task(taskId = 4L, priority = 2))
+      queue1.enqueue(task(taskId = 5L, priority = 1))
+      queue1.enqueue(task(taskId = 2L, priority = 1))
       waitForFeederData(queue1.feeder)
 
       queue1.getLastQueueItemId should be(Some(Timestamp(5L)))
@@ -161,56 +161,121 @@ class TestLogQueue extends FlatSpec {
     })
   }
 
-  ignore should "read queue items ordered by id from all priorities" in new QueueService {
+  it should "read queue items ordered by id with mixed priorities" in new QueueService {
     withQueueFactory(createQueue => {
       val queue1 = createQueue()
 
-      val t3 = queue1.enqueue(task(taskId = 3, priority = 1))
-      val t1 = queue1.enqueue(task(taskId = 1, priority = 2))
-      val t4 = queue1.enqueue(task(taskId = 4, priority = 2))
-      val t2 = queue1.enqueue(task(taskId = 2, priority = 1))
+      val t3 = queue1.enqueue(task(taskId = 3L, priority = 1))
+      val t1 = queue1.enqueue(task(taskId = 1L, priority = 2))
+      val t4 = queue1.enqueue(task(taskId = 4L, priority = 2))
+      val t2 = queue1.enqueue(task(taskId = 2L, priority = 1))
       waitForFeederData(queue1.feeder)
       queue1.feeder.take(20).toList // Load all items with feeder before acknowledging them
 
-      val a8_t2 = t2.toAck(8)
-      val a5_t1 = t1.toAck(5)
-      val a7_t3 = t3.toAck(7)
-      val a6_t4 = t4.toAck(6)
+      val a8_t2 = queue1.ack(t2.toAck(8L))
+      val a5_t1 = queue1.ack(t1.toAck(5L))
+      val a7_t3 = queue1.ack(t3.toAck(7L))
+      val a6_t4 = queue1.ack(t4.toAck(6L))
+      val t9 = queue1.enqueue(task(taskId = 9L, priority = 2))
       waitForFeederData(queue1.feeder)
 
       val readItems = using(queue1.readQueueItems(startItemId = t3.taskId, endItemId = a7_t3.ackId)) { reader =>
         reader.toList
       }
-      readItems should be(List(t1, t2, t3, t4, a5_t1, a6_t4, a7_t3, a8_t2))
+      readItems should be(List(t3, t4, a5_t1, a6_t4, a7_t3))
     })
   }
 
-  ignore should "write queue items" in new QueueService {
+  it should "read queue items ordered by id and one priority is empty" in new QueueService {
     withQueueFactory(createQueue => {
       val queue1 = createQueue()
 
-      val t1 = task(taskId = 1, priority = 1)
-      val t2 = task(taskId = 2, priority = 1)
-      val t3 = task(taskId = 3, priority = 2)
-      val t4 = task(taskId = 4, priority = 1)
-      val a5_t1 = t1.toAck(5)
-      val a6_t4 = t4.toAck(6)
-      val a7_t3 = t3.toAck(7)
-      val a8_t2 = t2.toAck(8)
+      val t3 = queue1.enqueue(task(taskId = 3L, priority = 1))
+      val t1 = queue1.enqueue(task(taskId = 1L, priority = 1))
+      val t4 = queue1.enqueue(task(taskId = 4L, priority = 1))
+      val t2 = queue1.enqueue(task(taskId = 2L, priority = 1))
+      waitForFeederData(queue1.feeder)
+      queue1.feeder.take(20).toList // Load all items with feeder before acknowledging them
 
+      val a8_t2 = queue1.ack(t2.toAck(8L))
+      val a5_t1 = queue1.ack(t1.toAck(5L))
+      val a7_t3 = queue1.ack(t3.toAck(7L))
+      val a6_t4 = queue1.ack(t4.toAck(6L))
+      val t9 = queue1.enqueue(task(taskId = 9L, priority = 1))
+      waitForFeederData(queue1.feeder)
+
+      val readItems = using(queue1.readQueueItems(startItemId = t3.taskId, endItemId = a7_t3.ackId)) { reader =>
+        reader.toList
+      }
+      readItems should be(List(t3, t4, a5_t1, a6_t4, a7_t3))
+    })
+  }
+
+  it should "read queue items queued in different log files" in new QueueService {
+    withQueueFactory(createQueue => {
+
+      // Simulate file rolling by adding each task item in a new queue instance,
+      def enqueue(item: QueueItem.Task): QueueItem.Task = {
+        val queue = createQueue()
+        // Empty the feeder before writing the item so wait unblock when the new item is readable
+        queue.feeder.take(20).toList
+        queue.enqueue(item)
+        waitForFeederData(queue.feeder)
+        queue.stop()
+        item
+      }
+
+      val t1 = enqueue(task(taskId = 1L, priority = 1))
+      val t2 = enqueue(task(taskId = 2L, priority = 1))
+      val t3 = enqueue(task(taskId = 3L, priority = 1))
+      val t4 = enqueue(task(taskId = 4L, priority = 1))
+
+      val queue1 = createQueue()
+      queue1.feeder.take(20).toList // Load all items with feeder before acknowledging them
+
+      val a8_t2 = queue1.ack(t2.toAck(8L))
+      val a5_t1 = queue1.ack(t1.toAck(5L))
+      val a7_t3 = queue1.ack(t3.toAck(7L))
+      val a6_t4 = queue1.ack(t4.toAck(6L))
+      val t9 = enqueue(task(taskId = 9L, priority = 1))
+
+      val readItems = using(createQueue().readQueueItems(startItemId = a6_t4.ackId, endItemId = t9.taskId)) { reader =>
+        reader.toList
+      }
+      readItems should be(List(a6_t4, a7_t3, a8_t2, t9))
+    })
+  }
+
+  it should "write queue items" in new QueueService {
+    withQueueFactory(createQueue => {
+
+      val t1 = task(taskId = 1L, priority = 1)
+      val t2 = task(taskId = 2L, priority = 1)
+      val t3 = task(taskId = 3L, priority = 2)
+      val t4 = task(taskId = 4L, priority = 1)
+      val a5_t1 = t1.toAck(5L)
+      val a6_t4 = t4.toAck(6L)
+      val a7_t3 = t3.toAck(7L)
+      val a8_t2 = t2.toAck(8L)
+      val t9 = task(taskId = 9L, priority = 1)
+
+      val queue1 = createQueue()
       queue1.writeQueueItem(t1)
       queue1.writeQueueItem(t2)
       queue1.writeQueueItem(t3)
       queue1.writeQueueItem(t4)
+      waitForFeederData(queue1.feeder)
       queue1.writeQueueItem(a5_t1)
       queue1.writeQueueItem(a6_t4)
       queue1.writeQueueItem(a7_t3)
       queue1.writeQueueItem(a8_t2)
+      queue1.writeQueueItem(t9)
+      waitForFeederData(queue1.feeder)
 
       val readItems = using(queue1.readQueueItems(startItemId = t3.taskId, endItemId = a7_t3.ackId)) { reader =>
         reader.toList
       }
-      readItems should be(List(t1, t2, t3, t4, a5_t1, a6_t4, a7_t3, a8_t2))
+      readItems should be(List(t3, t4, a5_t1, a6_t4, a7_t3))
     })
   }
 
