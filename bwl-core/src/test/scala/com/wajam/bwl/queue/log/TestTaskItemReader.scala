@@ -8,10 +8,11 @@ import com.wajam.bwl.QueueResource
 import com.wajam.bwl.ClosableIterator._
 import com.wajam.nrv.cluster.LocalNode
 import com.wajam.bwl.queue.QueueItem
-import com.wajam.nrv.data.{ InMessage, Message }
+import com.wajam.nrv.data.InMessage
 import org.scalatest.matchers.ShouldMatchers._
 import org.scalatest.mock.MockitoSugar
 import org.mockito.Mockito._
+import com.wajam.nrv.consistency.replication.ReplicationSourceIterator
 
 @RunWith(classOf[JUnitRunner])
 class TestTaskItemReader extends FlatSpec {
@@ -55,7 +56,7 @@ class TestTaskItemReader extends FlatSpec {
   }
 
   it should "call adapted Iterator.close() when closed" in new QueueService with MockitoSugar {
-    val mockItr = mock[Iterator[Option[Message]]]
+    val mockItr = mock[ReplicationSourceIterator]
     val reader = PriorityTaskItemReader(service, mockItr, Set())
     reader.close()
     verify(mockItr).close()

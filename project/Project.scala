@@ -59,6 +59,7 @@ object BwlBuild extends Build {
     .configs(IntegrationTest)
     .settings(defaultSettings: _*)
     .settings(testOptions in IntegrationTest := Seq(Tests.Filter(s => s.contains("Test"))))
+    .settings(parallelExecution in Test := false)
     .settings(parallelExecution in IntegrationTest := false)
     .settings(SbtStartScript.startScriptForClassesSettings: _*)
 }

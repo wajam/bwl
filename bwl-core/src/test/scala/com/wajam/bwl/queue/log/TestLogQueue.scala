@@ -144,18 +144,20 @@ class TestLogQueue extends FlatSpec {
     withQueueFactory(createQueue => {
       val queue1 = createQueue()
 
+      // Empty queue
       queue1.getLastQueueItemId should be(None)
 
+      // Non-empty queue
       queue1.enqueue(task(taskId = 3L, priority = 1))
       queue1.enqueue(task(taskId = 1L, priority = 2))
       queue1.enqueue(task(taskId = 4L, priority = 2))
       queue1.enqueue(task(taskId = 5L, priority = 1))
       queue1.enqueue(task(taskId = 2L, priority = 1))
       waitForFeederData(queue1.feeder)
-
       queue1.getLastQueueItemId should be(Some(Timestamp(5L)))
       queue1.stop()
 
+      // New non-empty queue instance
       val queue2 = createQueue()
       queue2.getLastQueueItemId should be(Some(Timestamp(5L)))
     })
@@ -278,8 +280,6 @@ class TestLogQueue extends FlatSpec {
     })
   }
 
-  it should "rewrite log tail if not properly finalized" in {
-
-  }
+  it should "rewrite log tail if not properly finalized" in pending
 
 }

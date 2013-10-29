@@ -68,7 +68,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
         }
 
       }
-      case None => throw new IllegalArgumentException(s"Queue '$name' unknown priority ${taskItem.priority}")
+      case None => throw new IllegalArgumentException(s"Queue '$token:$name' unknown priority ${taskItem.priority}")
     }
     taskItem
   }
@@ -85,7 +85,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
           totalTaskCount.decrementAndGet()
         }
       }
-      case None => throw new IllegalArgumentException(s"Queue '$name' unknown priority ${ackItem.priority}")
+      case None => throw new IllegalArgumentException(s"Queue '$token:$name' unknown priority ${ackItem.priority}")
     }
     ackItem
   }
@@ -124,6 +124,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
               findStartTimestamp(txLog)
             }
           }
+          debug(s"Reading queue '$token:$name#$priority' log from $initialTimestamp but filtering items before $startItemId")
 
           // Filter out items prior startItemId
           new ReplicationSourceIterator {
@@ -173,7 +174,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
       val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
       val initialTimestamp = startTimestamp.getOrElse(findStartTimestamp(txLog))
 
-      debug(s"Creating log queue reader '$name:$priority' starting at $initialTimestamp")
+      debug(s"Creating log queue reader '$token:$name#$priority' starting at $initialTimestamp")
 
       // Rebuild in-memory states by reading all the persisted tasks from the transaction log once
       val (total, processed) = rebuildPriorityQueueState(priority, initialTimestamp)
@@ -196,7 +197,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
 
     import com.wajam.commons.Closable.using
 
-    debug(s"Rebuilding queue state '$name:$priority'")
+    debug(s"Rebuilding queue state '$token:$name#$priority'")
 
     val recorder = recorders(priority)
     val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
@@ -232,7 +233,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
 
       val (all, processed) = processNext(Set(), Set())
 
-      debug(s"Rebuilding queue state '$name:$priority' completed (all=${all.size}, processed=${processed.size}})")
+      debug(s"Rebuilding queue state '$token:$name#$priority' completed (all=${all.size}, processed=${processed.size}})")
 
       (all.size, processed)
     }
@@ -245,7 +246,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   private def findStartTimestamp(txLog: FileTransactionLog): Timestamp = {
     import com.wajam.commons.Closable.using
 
-    debug(s"Finding the start timestamp '${txLog.service}'")
+    debug(s"Finding the start timestamp '$token:${txLog.service}'")
 
     using(txLog.read) { itr =>
       implicit val ord = Ordering[Option[Timestamp]]
@@ -259,7 +260,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
 
   def start() {
     if (!started) {
-      debug(s"Starting queue '$name'")
+      debug(s"Starting queue '$token:$name'")
       recorders.valuesIterator.foreach(_.start())
       started = true
     }
@@ -268,14 +269,14 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   def stop() {
     if (started) {
       started = false
-      debug(s"Stopping queue '$name'")
+      debug(s"Stopping queue '$token:$name'")
       recorders.valuesIterator.foreach(_.kill())
     }
   }
 
   private def requireStarted() {
     if (!started) {
-      throw new IllegalStateException(s"Queue '$name' not started!")
+      throw new IllegalStateException(s"Queue '$token:$name' not started!")
     }
   }
 
@@ -301,7 +302,7 @@ object LogQueue {
    */
   def create(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000)(token: Long, definition: QueueDefinition, service: Service)(implicit random: Random = Random): ConsistentQueue = {
 
-    Logger.debug(s"Create log queue '${definition.name}'")
+    Logger.debug(s"Create log queue '$token:${definition.name}'")
 
     val logDir = Paths.get(dataDir.getCanonicalPath, service.name, "queues")
     Files.createDirectories(logDir)
@@ -343,7 +344,7 @@ object LogQueue {
     definition.priorities.foreach(finalizeLog)
 
     val recorderFactory: RecorderFactory = (token, definition, priority) => {
-      Logger.debug(s"Create recorder '${queueNameFor(priority)}'")
+      Logger.debug(s"Create recorder '$token:${queueNameFor(priority)}'")
       new TransactionRecorder(memberFor(priority), txLogFor(priority), consistencyDelay, service.responseTimeout, logCommitFrequency, {})
     }
 

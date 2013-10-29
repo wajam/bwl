@@ -30,7 +30,7 @@ object PriorityTaskItemReader {
                                                var processed: Set[Timestamp]) extends PriorityTaskItemReader {
     import LogQueue.message2item
 
-    val taskItems: Iterator[Option[QueueItem.Task]] = itr.map {
+    lazy val taskItems: Iterator[Option[QueueItem.Task]] = itr.map {
       case Some(msg) => message2item(msg, service)
       case None => None
     }.collect {
@@ -50,9 +50,7 @@ object PriorityTaskItemReader {
 
     def next() = taskItems.next()
 
-    def close() {
-      itr.close()
-    }
+    def close() = itr.close()
 
     // TODO: support delayed tasks
     def delayedTasks: Iterable[QueueItem.Task] = Nil
