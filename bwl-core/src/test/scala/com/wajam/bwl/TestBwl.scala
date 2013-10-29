@@ -51,8 +51,8 @@ class TestBwl extends FunSuite {
         val p1Count = values.map(_("p")).count(_ == 1)
         val p2Count = values.map(_("p")).count(_ == 2)
 
-        p1Count should (be > 60 and be < 70)
-        p2Count should (be > 30 and be < 40)
+        p1Count should (be > 55 and be < 75)
+        p2Count should (be > 25 and be < 45)
       })
     }
 
