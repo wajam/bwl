@@ -13,7 +13,7 @@ import com.wajam.nrv.consistency.replication.{ ReplicationSourceIterator, Transa
 import com.wajam.bwl.QueueResource._
 import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import scala.util.Random
 import scala.annotation.tailrec
 import com.wajam.nrv.consistency.log.LogRecord.Index
@@ -39,8 +39,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
 
   private val totalTaskCount = new AtomicInteger()
 
-  @volatile
-  private var started = false
+  private var started = new AtomicBoolean(false)
 
   def enqueue(taskItem: QueueItem.Task) = {
     requireStarted()
@@ -259,27 +258,21 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   }
 
   def start() {
-    synchronized {
-      if (!started) {
-        debug(s"Starting queue '$token:$name'")
-        recorders.valuesIterator.foreach(_.start())
-        started = true
-      }
+    if (started.compareAndSet(false, true)) {
+      debug(s"Starting queue '$token:$name'")
+      recorders.valuesIterator.foreach(_.start())
     }
   }
 
   def stop() {
-    synchronized {
-      if (started) {
-        started = false
-        debug(s"Stopping queue '$token:$name'")
-        recorders.valuesIterator.foreach(_.kill())
-      }
+    if (started.compareAndSet(true, false)) {
+      debug(s"Stopping queue '$token:$name'")
+      recorders.valuesIterator.foreach(_.kill())
     }
   }
 
   private def requireStarted() {
-    if (!started) {
+    if (!started.get()) {
       throw new IllegalStateException(s"Queue '$token:$name' not started!")
     }
   }
@@ -408,10 +401,16 @@ object LogQueue {
    */
   private[log] object DummyTruncatableConsistentStore extends ConsistentStore {
     def requiresConsistency(message: Message) = ???
+
     def getLastTimestamp(ranges: Seq[TokenRange]) = ???
+
     def setCurrentConsistentTimestamp(getCurrentConsistentTimestamp: (TokenRange) => Timestamp) = ???
+
     def readTransactions(fromTime: Timestamp, toTime: Timestamp, ranges: Seq[TokenRange]) = ???
+
     def writeTransaction(message: Message) = ???
+
     def truncateAt(timestamp: Timestamp, token: Long) = {}
   }
+
 }
