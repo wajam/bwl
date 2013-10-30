@@ -259,18 +259,22 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   }
 
   def start() {
-    if (!started) {
-      debug(s"Starting queue '$token:$name'")
-      recorders.valuesIterator.foreach(_.start())
-      started = true
+    synchronized {
+      if (!started) {
+        debug(s"Starting queue '$token:$name'")
+        recorders.valuesIterator.foreach(_.start())
+        started = true
+      }
     }
   }
 
   def stop() {
-    if (started) {
-      started = false
-      debug(s"Stopping queue '$token:$name'")
-      recorders.valuesIterator.foreach(_.kill())
+    synchronized {
+      if (started) {
+        started = false
+        debug(s"Stopping queue '$token:$name'")
+        recorders.valuesIterator.foreach(_.kill())
+      }
     }
   }
 
