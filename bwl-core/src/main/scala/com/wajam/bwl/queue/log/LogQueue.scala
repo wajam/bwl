@@ -9,11 +9,11 @@ import java.nio.file.{ Files, Paths }
 import com.wajam.nrv.consistency._
 import com.wajam.nrv.service.{ TokenRange, Service }
 import com.wajam.nrv.consistency.log.{ TimestampedRecord, FileTransactionLog }
-import com.wajam.nrv.consistency.replication.TransactionLogReplicationIterator
+import com.wajam.nrv.consistency.replication.{ ReplicationSourceIterator, TransactionLogReplicationIterator }
 import com.wajam.bwl.QueueResource._
 import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import scala.util.Random
 import scala.annotation.tailrec
 import com.wajam.nrv.consistency.log.LogRecord.Index
@@ -39,8 +39,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
 
   private val totalTaskCount = new AtomicInteger()
 
-  @volatile
-  private var started = false
+  private var started = new AtomicBoolean(false)
 
   def enqueue(taskItem: QueueItem.Task) = {
     requireStarted()
@@ -68,7 +67,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
         }
 
       }
-      case None => throw new IllegalArgumentException(s"Queue '$name' unknown priority ${taskItem.priority}")
+      case None => throw new IllegalArgumentException(s"Queue '$token:$name' unknown priority ${taskItem.priority}")
     }
     taskItem
   }
@@ -76,14 +75,16 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   def ack(ackItem: QueueItem.Ack) = {
     requireStarted()
 
-    feeder.pendingTaskPriorityFor(ackItem.taskId).flatMap(priority => recorders.get(priority)) match {
+    recorders.get(ackItem.priority) match {
       case Some(recorder) => {
         val request = item2request(ackItem)
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
-        totalTaskCount.decrementAndGet()
+        if (feeder.isPending(ackItem.taskId)) {
+          totalTaskCount.decrementAndGet()
+        }
       }
-      case None => throw new IllegalArgumentException(s"Cannot acknowledge unknown task ${ackItem.taskId} for queue '$name'")
+      case None => throw new IllegalArgumentException(s"Queue '$token:$name' unknown priority ${ackItem.priority}")
     }
     ackItem
   }
@@ -99,9 +100,50 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
     val sources = recorders.map {
       case (priority, recorder) => {
         val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
-        val initialTimestamp = Ordering[Timestamp].max(findStartTimestamp(txLog), startItemId)
-        val itr = new TransactionLogReplicationIterator(recorder.member,
-          initialTimestamp, txLog, recorder.currentConsistentTimestamp)
+        val itr = if (txLog.getLogFiles.isEmpty) {
+          // Empty log
+          new ReplicationSourceIterator {
+            val start = startItemId
+            val end = Some(endItemId)
+
+            def hasNext = false
+
+            def next() = throw new NotImplementedError
+
+            def close() = {}
+          }
+        } else {
+          // The startItemId is may or may not exist in the priority log. The following code ensure that we start
+          // reading from an existing id prior startItemId.
+          val initialTimestamp = txLog.guessLogFile(startItemId).map(file => txLog.getIndexFromName(file.getName)) match {
+            case Some(Index(_, Some(consistentTimestamp))) => {
+              consistentTimestamp
+            }
+            case _ => {
+              findStartTimestamp(txLog)
+            }
+          }
+          debug(s"Reading queue '$token:$name#$priority' log from $initialTimestamp but filtering items before $startItemId")
+
+          // Filter out items prior startItemId
+          new ReplicationSourceIterator {
+            val start = startItemId
+            val end = Some(endItemId)
+            val source = new TransactionLogReplicationIterator(recorder.member,
+              initialTimestamp, txLog, recorder.currentConsistentTimestamp)
+            val filteredSource = source.filter {
+              case Some(msg) => msg.timestamp.get >= startItemId
+              case None => true
+            }
+
+            def hasNext = filteredSource.hasNext
+
+            def next() = filteredSource.next()
+
+            def close() = source.close()
+          }
+        }
+
         (priority, itr)
       }
     }.toMap
@@ -131,7 +173,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
       val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
       val initialTimestamp = startTimestamp.getOrElse(findStartTimestamp(txLog))
 
-      debug(s"Creating log queue reader '$name:$priority' starting at $initialTimestamp")
+      debug(s"Creating log queue reader '$token:$name#$priority' starting at $initialTimestamp")
 
       // Rebuild in-memory states by reading all the persisted tasks from the transaction log once
       val (total, processed) = rebuildPriorityQueueState(priority, initialTimestamp)
@@ -154,43 +196,48 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
 
     import com.wajam.commons.Closable.using
 
-    debug(s"Rebuilding queue state '$name:$priority'")
+    debug(s"Rebuilding queue state '$token:$name#$priority'")
 
     val recorder = recorders(priority)
     val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
     val member = recorder.member
     val endTimestamp = synchronized(rebuildEndPositions(priority))
 
-    using(new TransactionLogReplicationIterator(member, initialTimestamp, txLog, recorder.currentConsistentTimestamp)) { itr =>
-      val items = for {
-        msgOpt <- itr
-        msg <- msgOpt
-        item <- message2item(msg, service)
-      } yield item
-
-      // The log iterator does not return items beyond the consistent timestamp (i.e. `next` return None) and
+    using(new TransactionLogReplicationIterator(member, initialTimestamp, txLog, Some(Long.MaxValue), isDraining = true)) { itr =>
+      // The log replication source does not return items beyond the consistent timestamp (i.e. `next` return None) and
       // `hasNext` continue to returns true. This behavior is fine for its original purpose i.e. stay open and
       // produce new transactions to replicate once they are appended to the log.
       // In our case we want to read tasks up to the `endTimestamp` inclusively.
       @tailrec
       def processNext(allItems: Set[Timestamp], processedItems: Set[Timestamp]): (Set[Timestamp], Set[Timestamp]) = {
-        val (itemId, all, processed) = items.next() match {
-          case taskItem: QueueItem.Task if taskItem.taskId <= endTimestamp => {
-            (taskItem.taskId, allItems + taskItem.taskId, processedItems)
-          }
-          case taskItem: QueueItem.Task => (taskItem.taskId, allItems, processedItems)
-          case ackItem: QueueItem.Ack if allItems.contains(ackItem.taskId) => {
-            (ackItem.ackId, allItems - ackItem.taskId, processedItems + ackItem.taskId)
-          }
-          case ackItem: QueueItem.Ack => (ackItem.ackId, allItems, processedItems)
-        }
+        requireStarted()
 
-        if (itemId != endTimestamp) processNext(all, processed) else (all, processed)
+        if (itr.hasNext) itr.next() match {
+          case Some(msg) => {
+            val (itemId, all, processed) = message2item(msg, service) match {
+              case Some(taskItem: QueueItem.Task) if taskItem.taskId <= endTimestamp => {
+                (taskItem.taskId, allItems + taskItem.taskId, processedItems)
+              }
+              case Some(taskItem: QueueItem.Task) => (taskItem.taskId, allItems, processedItems)
+              case Some(ackItem: QueueItem.Ack) if allItems.contains(ackItem.taskId) => {
+                (ackItem.ackId, allItems - ackItem.taskId, processedItems + ackItem.taskId)
+              }
+              case Some(ackItem: QueueItem.Ack) => (ackItem.ackId, allItems, processedItems)
+            }
+
+            if (itemId < endTimestamp) processNext(all, processed) else (all, processed)
+          }
+          case None => processNext(allItems, processedItems)
+        }
+        else {
+          // Source is exhausted, stop here!
+          (allItems, processedItems)
+        }
       }
 
       val (all, processed) = processNext(Set(), Set())
 
-      debug(s"Rebuilding queue state '$name:$priority' completed (all=${all.size}, processed=${processed.size}})")
+      debug(s"Rebuilding queue state '$token:$name#$priority' completed (all=${all.size}, processed=${processed.size}})")
 
       (all.size, processed)
     }
@@ -203,7 +250,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   private def findStartTimestamp(txLog: FileTransactionLog): Timestamp = {
     import com.wajam.commons.Closable.using
 
-    debug(s"Finding the start timestamp '${txLog.service}'")
+    debug(s"Finding the start timestamp '$token:${txLog.service}'")
 
     using(txLog.read) { itr =>
       implicit val ord = Ordering[Option[Timestamp]]
@@ -216,24 +263,22 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   }
 
   def start() {
-    if (!started) {
-      debug(s"Starting queue '$name'")
+    if (started.compareAndSet(false, true)) {
+      debug(s"Starting queue '$token:$name'")
       recorders.valuesIterator.foreach(_.start())
-      started = true
     }
   }
 
   def stop() {
-    if (started) {
-      started = false
-      debug(s"Stopping queue '$name'")
+    if (started.compareAndSet(true, false)) {
+      debug(s"Stopping queue '$token:$name'")
       recorders.valuesIterator.foreach(_.kill())
     }
   }
 
   private def requireStarted() {
-    if (!started) {
-      throw new IllegalStateException(s"Queue '$name' not started!")
+    if (!started.get()) {
+      throw new IllegalStateException(s"Queue '$token:$name' not started!")
     }
   }
 
@@ -257,9 +302,9 @@ object LogQueue {
    * Creates a new LogQueue. This factory method is usable as [[com.wajam.bwl.queue.Queue.QueueFactory]] with the
    * Bwl service
    */
-  def create(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000)(token: Long, definition: QueueDefinition, service: Service)(implicit random: Random = Random): Queue = {
+  def create(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000)(token: Long, definition: QueueDefinition, service: Service)(implicit random: Random = Random): ConsistentQueue = {
 
-    Logger.debug(s"Create log queue '${definition.name}'")
+    Logger.debug(s"Create log queue '$token:${definition.name}'")
 
     val logDir = Paths.get(dataDir.getCanonicalPath, service.name, "queues")
     Files.createDirectories(logDir)
@@ -301,7 +346,7 @@ object LogQueue {
     definition.priorities.foreach(finalizeLog)
 
     val recorderFactory: RecorderFactory = (token, definition, priority) => {
-      Logger.debug(s"Create recorder '${queueNameFor(priority)}'")
+      Logger.debug(s"Create recorder '$token:${queueNameFor(priority)}'")
       new TransactionRecorder(memberFor(priority), txLogFor(priority), consistencyDelay, service.responseTimeout, logCommitFrequency, {})
     }
 
@@ -313,10 +358,13 @@ object LogQueue {
 
     message.function match {
       case MessageType.FUNCTION_CALL if message.path == "/enqueue" => {
-        message.timestamp.map(QueueItem.Task(_, message.token, message.param[Int](TaskPriority), message.getData[Any]))
+        message.timestamp.map(QueueItem.Task(message.param[String](QueueName), message.token,
+          message.param[Int](TaskPriority), _, message.getData[Any]))
       }
-      case MessageType.FUNCTION_CALL if message.path == "/ack" => message.timestamp.map(QueueItem.Ack(_,
-        taskId = message.param[Long](TaskId), token = message.token))
+      case MessageType.FUNCTION_CALL if message.path == "/ack" => {
+        message.timestamp.map(QueueItem.Ack(message.param[String](QueueName), message.token,
+          message.param[Int](TaskPriority), _, taskId = message.param[Long](TaskId)))
+      }
       case _ => throw new IllegalStateException(s"Unsupported message path: ${message.path}")
     }
   }
@@ -324,19 +372,19 @@ object LogQueue {
   private[log] def item2request(item: QueueItem): InMessage = {
     item match {
       case taskItem: QueueItem.Task => {
-        val params = Iterable[(String, MValue)](TaskPriority -> taskItem.priority)
-        createSyntheticRequest(taskItem.taskId, taskItem.token, "/enqueue", params, taskItem.data)
+        createSyntheticRequest(taskItem.taskId, taskItem.taskId, taskItem, "/enqueue", taskItem.data)
       }
-      case ackItem: QueueItem.Ack => createSyntheticRequest(ackItem.ackId, ackItem.token, "/ack")
+      case ackItem: QueueItem.Ack => createSyntheticRequest(ackItem.ackId, ackItem.taskId, ackItem, "/ack")
     }
   }
 
-  private[log] def createSyntheticRequest(taskId: Timestamp, taskToken: Long, path: String,
-                                          params: Iterable[(String, MValue)] = Nil, data: Any = null): InMessage = {
-    val extraParams = Iterable[(String, MValue)](TaskId -> taskId.value, TaskToken -> taskToken)
-    val request = new InMessage(params ++ extraParams, data = data)
-    request.token = taskToken
-    request.timestamp = Some(taskId)
+  private[log] def createSyntheticRequest(itemId: Timestamp, taskId: Timestamp, item: QueueItem, path: String,
+                                          data: Any = null): InMessage = {
+    val params = Iterable[(String, MValue)](QueueName -> item.name, TaskId -> taskId.value, TaskToken -> item.token,
+      TaskPriority -> item.priority)
+    val request = new InMessage(params, data = data)
+    request.token = item.token
+    request.timestamp = Some(itemId)
     request.function = MessageType.FUNCTION_CALL
     request.path = path
     request
@@ -358,10 +406,16 @@ object LogQueue {
    */
   private[log] object DummyTruncatableConsistentStore extends ConsistentStore {
     def requiresConsistency(message: Message) = ???
+
     def getLastTimestamp(ranges: Seq[TokenRange]) = ???
+
     def setCurrentConsistentTimestamp(getCurrentConsistentTimestamp: (TokenRange) => Timestamp) = ???
+
     def readTransactions(fromTime: Timestamp, toTime: Timestamp, ranges: Seq[TokenRange]) = ???
+
     def writeTransaction(message: Message) = ???
+
     def truncateAt(timestamp: Timestamp, token: Long) = {}
   }
+
 }

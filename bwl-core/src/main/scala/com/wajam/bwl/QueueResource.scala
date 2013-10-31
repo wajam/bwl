@@ -6,7 +6,7 @@ import com.wajam.bwl.queue.{ QueueDefinition, QueueItem, Queue }
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.nrv.InvalidParameter
 import com.wajam.nrv.utils.TimestampIdGenerator
-import com.wajam.nrv.data.{ Message, InMessage }
+import com.wajam.nrv.data.InMessage
 import QueueResource._
 import com.wajam.nrv.service.ServiceMember
 import com.wajam.commons.SynchronizedIdGenerator
@@ -20,29 +20,27 @@ class QueueResource(getQueue: => (Long, String) => Option[Queue], getDefinition:
   protected def create = (message: InMessage) => {
     val params: ParamsAccessor = message
 
-    val taskToken = params.param[Long](TaskToken)
-    val memberToken = getMember(taskToken).token
-    val queueName = params.param[String](QueueName)
+    val taskItem = message2task(params)
+    val memberToken = getMember(taskItem.token).token
 
-    getQueue(memberToken, queueName) match {
+    getQueue(memberToken, taskItem.name) match {
       case Some(queue: Queue) => {
         val taskItem = queue.enqueue(message2task(params))
         message.reply(Map(TaskId -> taskItem.taskId.toString))
       }
-      case None => throw new InvalidParameter(s"No queue '$queueName' for shard $memberToken")
+      case None => throw new InvalidParameter(s"No queue '${taskItem.name}' for shard $memberToken")
     }
   }
 
   protected def delete = (message: InMessage) => {
     val params: ParamsAccessor = message
 
-    val taskToken = params.param[Long](TaskToken)
-    val memberToken = getMember(taskToken).token
-    val queueName = params.param[String](QueueName)
+    val ackItem = message2ack(params)
+    val memberToken = getMember(ackItem.token).token
 
-    getQueue(memberToken, queueName) match {
+    getQueue(memberToken, ackItem.name) match {
       case Some(queue: Queue) => queue.ack(message2ack(params))
-      case None => throw new InvalidParameter(s"No queue '$queueName' for shard $memberToken")
+      case None => throw new InvalidParameter(s"No queue '${ackItem.name}' for shard $memberToken")
     }
   }
 
@@ -51,24 +49,28 @@ class QueueResource(getQueue: => (Long, String) => Option[Queue], getDefinition:
     val taskToken = params.param[Long](TaskToken)
     val queueName = params.param[String](QueueName)
 
-    params.optionalParam[Int](TaskPriority) match {
-      case Some(priority) => {
-        QueueItem.Task(taskId, taskToken, priority, params.message.getData[Any])
-      }
-      case None if getDefinition(queueName).priorities.size == 1 => {
-        // If no priority is specified and queue has only one priority, default to that priority
-        QueueItem.Task(taskId, taskToken, getDefinition(queueName).priorities.head.value, params.message.getData[Any])
-      }
-      case None => throw new InvalidParameter(s"Parameter priority must be specified: ${params.message.path}")
-    }
+    QueueItem.Task(queueName, taskToken, priorityParam(params), taskId, params.message.getData[Any])
   }
 
   def message2ack(params: ParamsAccessor): QueueItem.Ack = {
     val taskId = params.param[Long](TaskId)
     val ackId: Timestamp = params.message.timestamp.getOrElse(timestampGenerator.nextId)
     val taskToken = params.param[Long](TaskToken)
+    val queueName = params.param[String](QueueName)
 
-    QueueItem.Ack(ackId, taskId, taskToken)
+    QueueItem.Ack(queueName, taskToken, priorityParam(params), ackId, taskId)
+  }
+
+  private def priorityParam(params: ParamsAccessor): Int = {
+    val queueName = params.param[String](QueueName)
+    params.optionalParam[Int](TaskPriority) match {
+      case Some(priority) => priority
+      case None if getDefinition(queueName).priorities.size == 1 => {
+        // If no priority is specified and queue has only one priority, default to that priority
+        getDefinition(queueName).priorities.head.value
+      }
+      case None => throw new InvalidParameter(s"Parameter priority must be specified: ${params.message.path}")
+    }
   }
 }
 

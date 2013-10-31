@@ -45,7 +45,10 @@ trait ConsistentBwl extends ConsistentStore with Startable {
       val queueName = params.param[String](QueueName)
 
       // Ensure the message path is referring to a consistent queue
-      queues.get((member.token, queueName)).exists(_.isInstanceOf[ConsistentQueue])
+      queues.get((member.token, queueName)) match {
+        case Some(QueueWrapper(_: ConsistentQueue, _)) => true
+        case _ => false
+      }
     } else {
       false
     }
@@ -71,12 +74,8 @@ trait ConsistentBwl extends ConsistentStore with Startable {
    * specified service member token ranges and id ranges.
    */
   def readTransactions(startTime: Timestamp, endTime: Timestamp, ranges: Seq[TokenRange]) = {
-    val memberToken = range2token(ranges)
-    val consistentQueues = queues.map { case (key, wrapper) => key -> wrapper.queue }.collect {
-      case ((queueToken, _), queue: ConsistentQueue) if queueToken == memberToken => queue
-    }
-
-    val iterators: List[PeekIterator[QueueItem] with Closable] = consistentQueues.map(queue =>
+    val member = memberFor(range2token(ranges))
+    val iterators: List[PeekIterator[QueueItem] with Closable] = allConsistentQueuesFor(member).map(queue =>
       ClosablePeekIterator(queue.readQueueItems(startTime, endTime))).toList
 
     new Iterator[Message] with Closable {
@@ -101,6 +100,9 @@ trait ConsistentBwl extends ConsistentStore with Startable {
     val taskToken = params.param[Long](TaskToken)
     val member = memberFor(taskToken)
     val queueName = params.param[String](QueueName)
+
+    require(!queues.contains((member.token, queueName)),
+      s"Cannot replicate to master replica queue ${member.token}:$queueName. Must be a slave replica queue!")
 
     initializeMemberReplicaQueues(member)
     replicaQueues.get((member.token, queueName)) match {
@@ -134,11 +136,12 @@ trait ConsistentBwl extends ConsistentStore with Startable {
    * Ensure the replica consistent queues for the specified member are initialized or initialize them if not.
    */
   private def initializeMemberReplicaQueues(member: ServiceMember) {
-    if (!initializedReplicas.contains(member.token)) {
+    if (!cluster.isLocalNode(member.node) && !initializedReplicas.contains(member.token)) {
       synchronized {
         // TODO: Create only consistent queues once factory is moved to the queue definition
-        replicaQueues ++= definitions.map(definition =>
-          (member.token, definition.name) -> createQueue(member.token, definition, this))
+        val newQueues = definitions.map(definition => createQueue(member.token, definition, this))
+        newQueues.foreach(_.start())
+        replicaQueues ++= newQueues.map(queue => (member.token, queue.name) -> queue)
         initializedReplicas += member.token
       }
     }
@@ -172,9 +175,9 @@ trait ConsistentBwl extends ConsistentStore with Startable {
     }
   }
 
-  private def task2message(taskItem: QueueItem.Task): Message = {
-    val params: Map[String, MValue] =
-      Map(TaskId -> taskItem.taskId.toString, TaskToken -> taskItem.token.toString, TaskPriority -> taskItem.priority)
+  def task2message(taskItem: QueueItem.Task): Message = {
+    val params: Map[String, MValue] = Map(QueueName -> taskItem.name, TaskToken -> taskItem.token.toString,
+      TaskPriority -> taskItem.priority, TaskId -> taskItem.taskId.toString)
     val request = new InMessage(params, data = taskItem.data)
     request.token = taskItem.token
     request.timestamp = Some(taskItem.taskId)
@@ -185,8 +188,9 @@ trait ConsistentBwl extends ConsistentStore with Startable {
     request
   }
 
-  private def ack2message(ackItem: QueueItem.Ack): Message = {
-    val params: Map[String, MValue] = Map(TaskId -> ackItem.taskId.toString, TaskToken -> ackItem.token.toString)
+  def ack2message(ackItem: QueueItem.Ack): Message = {
+    val params: Map[String, MValue] = Map(QueueName -> ackItem.name, TaskToken -> ackItem.token.toString,
+      TaskPriority -> ackItem.priority, TaskId -> ackItem.taskId.toString)
     val request = new InMessage(params)
     request.token = ackItem.token
     request.timestamp = Some(ackItem.ackId)

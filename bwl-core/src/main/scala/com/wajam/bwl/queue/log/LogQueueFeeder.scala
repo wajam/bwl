@@ -97,7 +97,7 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
     readers.valuesIterator.foreach(_.close())
   }
 
-  def pendingTaskPriorityFor(taskId: Timestamp): Option[Int] = pendingItems.get(taskId).map(_.priority)
+  def isPending(taskId: Timestamp): Boolean = pendingItems.contains(taskId)
 
   def pendingTasks: Iterator[QueueItem.Task] = pendingItems.valuesIterator
 

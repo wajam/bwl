@@ -8,10 +8,11 @@ import com.wajam.bwl.QueueResource
 import com.wajam.bwl.ClosableIterator._
 import com.wajam.nrv.cluster.LocalNode
 import com.wajam.bwl.queue.QueueItem
-import com.wajam.nrv.data.{ InMessage, Message }
+import com.wajam.nrv.data.InMessage
 import org.scalatest.matchers.ShouldMatchers._
 import org.scalatest.mock.MockitoSugar
 import org.mockito.Mockito._
+import com.wajam.nrv.consistency.replication.ReplicationSourceIterator
 
 @RunWith(classOf[JUnitRunner])
 class TestTaskItemReader extends FlatSpec {
@@ -22,12 +23,12 @@ class TestTaskItemReader extends FlatSpec {
     resource.registerTo(service)
   }
 
-  private def task(id: Int): QueueItem = QueueItem.Task(id, id, id, id)
+  private def task(id: Int): QueueItem = QueueItem.Task("name", token = id, priority = id, id, data = id)
 
   private def someTaskMessage(taskId: Int): Option[InMessage] = Some(LogQueue.item2request(task(taskId)))
 
   private def someAckMessage(ackId: Long, taskId: Int): Option[InMessage] = Some(
-    LogQueue.item2request(QueueItem.Ack(ackId, taskId, token = taskId)))
+    LogQueue.item2request(QueueItem.Ack("name", token = taskId, priority = taskId, ackId, taskId)))
 
   "Reader" should "convert task request message to QueueItem.Task" in new QueueService {
     val messages = Iterator(someTaskMessage(1), someTaskMessage(2))
@@ -55,7 +56,7 @@ class TestTaskItemReader extends FlatSpec {
   }
 
   it should "call adapted Iterator.close() when closed" in new QueueService with MockitoSugar {
-    val mockItr = mock[Iterator[Option[Message]]]
+    val mockItr = mock[ReplicationSourceIterator]
     val reader = PriorityTaskItemReader(service, mockItr, Set())
     reader.close()
     verify(mockItr).close()

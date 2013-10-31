@@ -61,14 +61,14 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
   }
 
   /**
-   * Acknowledge the specified task by id
+   * Acknowledge the specified task
    */
-  private[bwl] def ack(token: Long, name: String, id: Long)(implicit ec: ExecutionContext): Future[Unit] = {
+  private[bwl] def ack(token: Long, name: String, id: Long, priority: Int)(implicit ec: ExecutionContext): Future[Unit] = {
     import QueueResource._
 
     val action = queueResource.delete(this).get
 
-    val params: List[(String, MValue)] = List(TaskToken -> token, QueueName -> name, TaskId -> id)
+    val params = List[(String, MValue)](TaskToken -> token, QueueName -> name, TaskId -> id, TaskPriority -> priority)
     val result = action.call(params = params, meta = Map(), data = null)
     result.map(_ => Unit)
   }
@@ -122,13 +122,13 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
     response.onSuccess {
       case Result.Ok => {
         executeIfCallbackNotExpired {
-          ack(taskToken, definition.name, taskId)
+          ack(taskToken, definition.name, taskId, priority)
           request.ok()
         }
       }
       case Result.Fail(error, ignore) if ignore => {
         executeIfCallbackNotExpired {
-          ack(taskToken, definition.name, taskId)
+          ack(taskToken, definition.name, taskId, priority)
           request.ignore(error)
         }
       }
