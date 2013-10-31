@@ -65,6 +65,9 @@ class TestLogQueue extends FlatSpec {
       }
     }
 
+    /**
+     * Wait until specified feeder is ready to produce non empty data or the timeout is reach.
+     */
     def waitForFeederData(feeder: Feeder, timeoutInMs: Long = 2000L, sleepTimeInMs: Long = 50L) {
       val startTime = System.currentTimeMillis()
       while (feeder.peek().isEmpty) {

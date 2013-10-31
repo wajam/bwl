@@ -28,12 +28,13 @@ class TestConsistentBwl extends FlatSpec {
       f.consistentBwl.requiresConsistency(taskMsg) should be(true)
       f.consistentBwl.requiresConsistency(ackMsg) should be(true)
 
+      // Not an enqueue or ack message
       val dummyMsg = new InMessage()
       f.consistentBwl.requiresConsistency(dummyMsg) should be(false)
     })
   }
 
-  it should "NOT requires consistency for task and ack messages for NON consistent queue" in {
+  it should "NOT require consistency for task and ack messages for NON consistent queue" in {
     implicit val queueFactory: QueueFactory = memoryQueueFactory
 
     new OkCallbackFixture with ConsistentBwlFixture with MultiplePriorityQueueFixture {}.runWithConsistentFixture((f) => {
