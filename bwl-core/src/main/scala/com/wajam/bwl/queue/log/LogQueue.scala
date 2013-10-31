@@ -203,31 +203,36 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
     val member = recorder.member
     val endTimestamp = synchronized(rebuildEndPositions(priority))
 
-    using(new TransactionLogReplicationIterator(member, initialTimestamp, txLog, recorder.currentConsistentTimestamp)) { itr =>
-      val items = for {
-        msgOpt <- itr
-        msg <- msgOpt
-        item <- message2item(msg, service)
-      } yield item
-
-      // The log iterator does not return items beyond the consistent timestamp (i.e. `next` return None) and
+    using(new TransactionLogReplicationIterator(member, initialTimestamp, txLog, Some(Long.MaxValue), isDraining = true)) { itr =>
+      // The log replication source does not return items beyond the consistent timestamp (i.e. `next` return None) and
       // `hasNext` continue to returns true. This behavior is fine for its original purpose i.e. stay open and
       // produce new transactions to replicate once they are appended to the log.
       // In our case we want to read tasks up to the `endTimestamp` inclusively.
       @tailrec
       def processNext(allItems: Set[Timestamp], processedItems: Set[Timestamp]): (Set[Timestamp], Set[Timestamp]) = {
-        val (itemId, all, processed) = items.next() match {
-          case taskItem: QueueItem.Task if taskItem.taskId <= endTimestamp => {
-            (taskItem.taskId, allItems + taskItem.taskId, processedItems)
-          }
-          case taskItem: QueueItem.Task => (taskItem.taskId, allItems, processedItems)
-          case ackItem: QueueItem.Ack if allItems.contains(ackItem.taskId) => {
-            (ackItem.ackId, allItems - ackItem.taskId, processedItems + ackItem.taskId)
-          }
-          case ackItem: QueueItem.Ack => (ackItem.ackId, allItems, processedItems)
-        }
+        requireStarted()
 
-        if (itemId != endTimestamp) processNext(all, processed) else (all, processed)
+        if (itr.hasNext) itr.next() match {
+          case Some(msg) => {
+            val (itemId, all, processed) = message2item(msg, service) match {
+              case Some(taskItem: QueueItem.Task) if taskItem.taskId <= endTimestamp => {
+                (taskItem.taskId, allItems + taskItem.taskId, processedItems)
+              }
+              case Some(taskItem: QueueItem.Task) => (taskItem.taskId, allItems, processedItems)
+              case Some(ackItem: QueueItem.Ack) if allItems.contains(ackItem.taskId) => {
+                (ackItem.ackId, allItems - ackItem.taskId, processedItems + ackItem.taskId)
+              }
+              case Some(ackItem: QueueItem.Ack) => (ackItem.ackId, allItems, processedItems)
+            }
+
+            if (itemId < endTimestamp) processNext(all, processed) else (all, processed)
+          }
+          case None => processNext(allItems, processedItems)
+        }
+        else {
+          // Source is exhausted, stop here!
+          (allItems, processedItems)
+        }
       }
 
       val (all, processed) = processNext(Set(), Set())
