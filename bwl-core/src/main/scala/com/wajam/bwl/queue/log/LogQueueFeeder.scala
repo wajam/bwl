@@ -103,4 +103,9 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
 
   // TODO: Should delayed tasks be sorted by id or we don't really care?
   def delayedTasks: Iterator[QueueItem.Task] = readers.valuesIterator.flatMap(_.delayedTasks)
+
+  /**
+   * Returns the oldest task id processed (when feeder is idle) or currently scheduled to be processed (either pending or delayed).
+   */
+  def oldestTaskIdFor(priority: Int): Option[Timestamp] = taskContext.data.get(priority.toString).map(_.toString.toLong)
 }
