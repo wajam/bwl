@@ -59,16 +59,19 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
     feeder.pendingTasks.toList should be(List(task(2L), task(3L)))
     feeder.isPending(1L) should be(false)
     context.data("1") should be(2L) // priority position in task context
+    feeder.oldestTaskIdFor(1) should be(Some(Timestamp(2L)))
 
     // Verify feeder state after acknowledging the last task
     feeder.ack(feederData(3L))
     feeder.pendingTasks.toList should be(List(task(2L)))
     context.data("1") should be(2L) // priority position in task context
+    feeder.oldestTaskIdFor(1) should be(Some(Timestamp(2L)))
 
     // Verify feeder state after acknowledging the middle task
     feeder.ack(feederData(2L))
     feeder.pendingTasks.toList should be(List())
     context.data("1") should be(3L) // priority position in task context
+    feeder.oldestTaskIdFor(1) should be(Some(Timestamp(3L)))
   }
 
   it should "start at context position" in {
@@ -85,6 +88,7 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
     val feeder = new LogQueueFeeder(QueueDefinition("name", dummyCallback), createReader)
     val context = TaskContext(data = Map("1" -> expectedStartTimestamp.value))
     feeder.init(context)
+    feeder.oldestTaskIdFor(1) should be(Some(expectedStartTimestamp))
 
     actualStartTimestamp should be(Some(expectedStartTimestamp))
   }

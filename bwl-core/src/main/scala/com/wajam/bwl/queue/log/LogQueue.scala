@@ -17,14 +17,17 @@ import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import scala.util.Random
 import scala.annotation.tailrec
 import com.wajam.nrv.consistency.log.LogRecord.Index
-import com.wajam.commons.Logging
+import com.wajam.commons.{ Closable, Logging }
 import LogQueue._
+import com.wajam.bwl.utils.PeekIterator
+import scala.concurrent.ExecutionContext
+import java.util.concurrent.{ TimeUnit, Executors }
 
 /**
  * Persistent queue using NRV transaction log as backing storage. Each priority is appended to separate log.
  */
-class LogQueue(val token: Long, service: Service, val definition: QueueDefinition,
-               recorderFactory: RecorderFactory)(implicit random: Random = Random) extends ConsistentQueue with Logging {
+class LogQueue(val token: Long, service: Service, val definition: QueueDefinition, recorderFactory: RecorderFactory,
+               logCleanFrequencyInMs: Long)(implicit random: Random = Random) extends ConsistentQueue with Logging {
 
   private val recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
 
@@ -36,6 +39,16 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   private var rebuildEndPositions: Map[Int, Timestamp] = recorders.collect {
     case (priority, recorder) if recorder.currentConsistentTimestamp.isDefined => priority -> recorder.currentConsistentTimestamp.get
   }.toMap
+
+  private val cleanupExecutionContext = ExecutionContext.fromExecutorService(Executors.newCachedThreadPool())
+  private val cleaners: Map[Int, LogCleaner] = recorders.map {
+    case (priority, recorder) => {
+      implicit val ec = cleanupExecutionContext
+      priority -> new LogCleaner(recorder.txLog.asInstanceOf[FileTransactionLog], oldestItemIdFor(priority), logCleanFrequencyInMs)
+    }
+  }
+
+  private var openReadIterators: List[PeekIterator[QueueItem]] = Nil
 
   private val totalTaskCount = new AtomicInteger()
 
@@ -83,6 +96,8 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
         if (feeder.isPending(ackItem.taskId)) {
           totalTaskCount.decrementAndGet()
         }
+
+        cleaners(ackItem.priority).tick()
       }
       case None => throw new IllegalArgumentException(s"Queue '$token:$name' unknown priority ${ackItem.priority}")
     }
@@ -148,7 +163,17 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
       }
     }.toMap
 
-    new QueueItemReader(service, endItemId, sources)
+    val reader = new QueueItemReader(service, endItemId, sources)
+    new PeekIterator(reader) with Closable {
+      // Keep track of the open read iterators to ensure the cleanup job is not deleted files while they are read.
+      // Use PeekIterator so the cleanup job knows the next queue item read without consuming it.
+      LogQueue.this.synchronized(openReadIterators = this :: openReadIterators)
+
+      def close() = {
+        LogQueue.this.synchronized(openReadIterators = openReadIterators.filterNot(_ == this))
+        reader.close()
+      }
+    }
   }
 
   def writeQueueItem(item: QueueItem) = item match {
@@ -272,6 +297,12 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   def stop() {
     if (started.compareAndSet(true, false)) {
       debug(s"Stopping queue '$token:$name'")
+      try {
+        cleanupExecutionContext.shutdown()
+        cleanupExecutionContext.awaitTermination(2000L, TimeUnit.MILLISECONDS)
+      } catch {
+        case e: InterruptedException => warn(s"Timeout while shutting down queue '$token:$name' executor service.")
+      }
       recorders.valuesIterator.foreach(_.kill())
     }
   }
@@ -290,6 +321,17 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
     def delayedTasks = feeder.delayedTasks.toIterable
   }
 
+  /**
+   * Find the oldest item between the feeder task processed and the items currently being read for replication
+   */
+  private[log] def oldestItemIdFor(priority: Int): Option[Timestamp] = {
+    val processed: Option[Timestamp] = feeder.oldestTaskIdFor(priority)
+    val replicated: Option[Timestamp] = synchronized {
+      openReadIterators.collect { case itr if itr.hasNext => itr.peek.itemId }.reduceOption(Ordering[Timestamp].min)
+    }
+    // Returns the smallest of the non-empty values
+    (processed ++ replicated).reduceOption(Ordering[Timestamp].min)
+  }
 }
 
 object LogQueue {
@@ -302,7 +344,8 @@ object LogQueue {
    * Creates a new LogQueue. This factory method is usable as [[com.wajam.bwl.queue.Queue.QueueFactory]] with the
    * Bwl service
    */
-  def create(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000)(token: Long, definition: QueueDefinition, service: Service)(implicit random: Random = Random): ConsistentQueue = {
+  def create(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000,
+             logCleanFrequencyInMs: Long = 3600000L)(token: Long, definition: QueueDefinition, service: Service)(implicit random: Random = Random): ConsistentQueue = {
 
     Logger.debug(s"Create log queue '$token:${definition.name}'")
 
@@ -350,7 +393,7 @@ object LogQueue {
       new TransactionRecorder(memberFor(priority), txLogFor(priority), consistencyDelay, service.responseTimeout, logCommitFrequency, {})
     }
 
-    new LogQueue(token, service, definition, recorderFactory)
+    new LogQueue(token, service, definition, recorderFactory, logCleanFrequencyInMs)
   }
 
   private[log] def message2item(message: Message, service: Service): Option[QueueItem] = {
