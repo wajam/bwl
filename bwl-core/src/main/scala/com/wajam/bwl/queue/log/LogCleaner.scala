@@ -3,7 +3,7 @@ package com.wajam.bwl.queue.log
 import com.wajam.nrv.consistency.log.FileTransactionLog
 import com.wajam.nrv.utils.timestamp.Timestamp
 import java.io.File
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Random
 import com.wajam.commons.{ CurrentTime, Logging }
 import scala.concurrent.ExecutionContext
@@ -15,49 +15,41 @@ import scala.concurrent.ExecutionContext
  * method.
  */
 class LogCleaner(txLog: FileTransactionLog, oldestTimestamp: => Option[Timestamp],
-                 cleanFrequencyInMs: Long)(implicit random: Random = Random) extends CurrentTime with Logging {
+                 cleanFrequencyInMs: Long)(implicit ec: ExecutionContext, random: Random = Random) extends CurrentTime with Logging {
 
-  private val nextCleanupTime = new AtomicLong(currentTime + (math.abs(random.nextLong()) % cleanFrequencyInMs))
+  @volatile
+  private var nextCleanupTime: Long = currentTime + cleanFrequencyInMs / 2 +
+    (math.abs(random.nextLong()) % cleanFrequencyInMs / 2)
 
-  private var running: Boolean = false
+  private val running = new AtomicBoolean(false)
 
   /**
    * Trigger the cleanup job if the job scheduled time has come. Returns a true if the cleanup job has been
    * triggered by this call or None if not the case.
    */
   def tick(): Boolean = {
-    val next = nextCleanupTime.get
     val now = currentTime
-    // TODO: Need to discuss why the synchronized running flag is use in this condition check
-    if (now >= next && !synchronized(running) && nextCleanupTime.compareAndSet(next, now + cleanFrequencyInMs)) {
-      synchronized {
-        // The running flag prevent concurrent cleanup if the `cleanFrequencyInMs` value is shorter than the cleanup
-        // job elapsed time.
-        if (!running) {
-          running = true
+    if (now >= nextCleanupTime && running.compareAndSet(false, true)) {
+      nextCleanupTime = now + cleanFrequencyInMs
 
-          debug(s"Cleaning up '${txLog.service}' extra log files")
+      debug(s"Cleaning up '${txLog.service}' extra log files")
 
-          import ExecutionContext.Implicits.global
-          import scala.concurrent._
-          val cleanupFuture = future(cleanupLogFiles())
+      import scala.concurrent._
+      val cleanupFuture = future(cleanupLogFiles())
 
-          cleanupFuture onFailure {
-            case error => {
-              warn(s"Cleanup error '${txLog.service}': ", error)
-              // TODO: Need to synchronize again? This is invoked asynchronously but only one future is executed at a time. @volatile perhaps?
-              synchronized(running = false)
-            }
-          }
-          cleanupFuture onSuccess {
-            case deletedFiles => {
-              debug(s"Cleanup '${txLog.service}' deleted ${deletedFiles.size} log file(s).")
-              synchronized(running = false) // TODO: Idem
-            }
-          }
-          true
-        } else false
+      cleanupFuture onFailure {
+        case error => {
+          warn(s"Cleanup error '${txLog.service}': ", error)
+          running.set(false)
+        }
       }
+      cleanupFuture onSuccess {
+        case deletedFiles => {
+          debug(s"Cleanup '${txLog.service}' deleted ${deletedFiles.size} log file(s).")
+          running.set(false)
+        }
+      }
+      true
     } else false
   }
 
@@ -79,33 +71,14 @@ class LogCleaner(txLog: FileTransactionLog, oldestTimestamp: => Option[Timestamp
       }
     }
 
-    /*
-    // TODO: why the following code doesn't compile? "type mismatch: found Iterable[File], required: Option[?]"
-    val filesToDelete2 = for {
-      timestamp <- safeTimestamp
-      maxCleanupFile <- txLog.guessLogFile(timestamp)
+    // Only delete files prior the computed 'safe' timestamp
+    val filesToDelete = for {
+      timestamp <- safeTimestamp.toList
+      maxCleanupFile <- txLog.guessLogFile(timestamp).toList
       file <- txLog.getLogFiles.takeWhile(_.getCanonicalPath < maxCleanupFile.getCanonicalPath)
     } yield file
-*/
-
-    // Only delete files prior the computed 'safe' timestamp
-    val filesToDelete: Option[List[File]] = for {
-      timestamp <- safeTimestamp
-      maxCleanupFile <- txLog.guessLogFile(timestamp)
-    } yield txLog.getLogFiles.takeWhile(_.getCanonicalPath < maxCleanupFile.getCanonicalPath).toList
-
-    filesToDelete.foreach(files => files.foreach(_.delete()))
-    filesToDelete.getOrElse(Nil)
-    /*
-    // TODO: is the following match than the two lines above?
-    filesToDelete match {
-      case Some(files) => {
-        files.foreach(_.delete())
-        files
-      }
-      case None => Nil
-    }
-*/
+    filesToDelete.foreach(_.delete())
+    filesToDelete
   }
 
 }

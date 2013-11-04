@@ -20,6 +20,8 @@ import com.wajam.nrv.consistency.log.LogRecord.Index
 import com.wajam.commons.{ Closable, Logging }
 import LogQueue._
 import com.wajam.bwl.utils.PeekIterator
+import scala.concurrent.ExecutionContext
+import java.util.concurrent.{ TimeUnit, Executors }
 
 /**
  * Persistent queue using NRV transaction log as backing storage. Each priority is appended to separate log.
@@ -38,8 +40,10 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
     case (priority, recorder) if recorder.currentConsistentTimestamp.isDefined => priority -> recorder.currentConsistentTimestamp.get
   }.toMap
 
+  private val cleanupExecutionContext = ExecutionContext.fromExecutorService(Executors.newCachedThreadPool())
   private val cleaners: Map[Int, LogCleaner] = recorders.map {
     case (priority, recorder) => {
+      implicit val ec = cleanupExecutionContext
       priority -> new LogCleaner(recorder.txLog.asInstanceOf[FileTransactionLog], oldestItemIdFor(priority), logCleanFrequencyInMs)
     }
   }
@@ -293,6 +297,12 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   def stop() {
     if (started.compareAndSet(true, false)) {
       debug(s"Stopping queue '$token:$name'")
+      try {
+        cleanupExecutionContext.shutdown()
+        cleanupExecutionContext.awaitTermination(2000L, TimeUnit.MILLISECONDS)
+      } catch {
+        case e: InterruptedException => warn(s"Timeout while shutting down queue '$token:$name' executor service.")
+      }
       recorders.valuesIterator.foreach(_.kill())
     }
   }
@@ -315,12 +325,12 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
    * Find the oldest item between the feeder task processed and the items currently being read for replication
    */
   private[log] def oldestItemIdFor(priority: Int): Option[Timestamp] = {
-    val processed = feeder.oldestTaskIdFor(priority)
-    val replicated = synchronized { // TODO: really need synchronisation?
+    val processed: Option[Timestamp] = feeder.oldestTaskIdFor(priority)
+    val replicated: Option[Timestamp] = synchronized {
       openReadIterators.collect { case itr if itr.hasNext => itr.peek.itemId }.reduceOption(Ordering[Timestamp].min)
     }
     // Returns the smallest of the non-empty values
-    Iterator(processed, replicated).flatten.reduceOption(Ordering[Timestamp].min)
+    (processed ++ replicated).reduceOption(Ordering[Timestamp].min)
   }
 }
 

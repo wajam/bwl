@@ -14,6 +14,7 @@ import com.wajam.nrv.consistency.log.LogRecord.Index
 import scala.util.Random
 import com.wajam.commons.ControlableCurrentTime
 import com.wajam.spnl.feeder.Feeder
+import scala.concurrent.ExecutionContext
 
 @RunWith(classOf[JUnitRunner])
 class TestLogCleaner extends FlatSpec {
@@ -62,6 +63,7 @@ class TestLogCleaner extends FlatSpec {
   }
 
   "Cleaner" should "not crash if log is empty" in new FileLog {
+    import ExecutionContext.Implicits.global
     withTransactionLog(txLog => {
       var oldestTimestamp: Option[Timestamp] = None
       val cleaner = new LogCleaner(txLog, oldestTimestamp, cleanFrequencyInMs = 1000000L)
@@ -73,6 +75,7 @@ class TestLogCleaner extends FlatSpec {
   }
 
   it should "clean expected files" in new FileLog {
+    import ExecutionContext.Implicits.global
     withTransactionLog(txLog => {
 
       var oldestTimestamp: Option[Timestamp] = None
@@ -119,9 +122,10 @@ class TestLogCleaner extends FlatSpec {
   }
 
   it should "trigger cleanup on tick" in new FileLog {
+    import ExecutionContext.Implicits.global
     withTransactionLog(txLog => {
 
-      implicit val random = new Random(9) // Tick will trigger cleanup after 40ms
+      implicit val random = new Random(9) // Tick will trigger cleanup after 120ms
       var oldestTimestamp: Option[Timestamp] = None
       val cleaner = new LogCleaner(txLog, oldestTimestamp, cleanFrequencyInMs = 200) with ControlableCurrentTime
 
@@ -134,7 +138,7 @@ class TestLogCleaner extends FlatSpec {
       txLog.getLogFiles.size should be(5)
 
       oldestTimestamp = Some(4L)
-      cleaner.currentTime = 40
+      cleaner.currentTime = 120
       cleaner.tick() should be(true)
       waitForCondition() {
         // Wait until cleanup completed or timeout
@@ -145,21 +149,22 @@ class TestLogCleaner extends FlatSpec {
   }
 
   it should "tick tick boom once per frequency period" in new FileLog {
+    import ExecutionContext.Implicits.global
     withTransactionLog(txLog => {
 
-      implicit val random = new Random(9) // Tick will trigger cleanup after 40ms
+      implicit val random = new Random(9) // Tick will trigger cleanup after 120ms
       var oldestTimestamp: Option[Timestamp] = None
       val cleaner = new LogCleaner(txLog, oldestTimestamp, cleanFrequencyInMs = 200) with ControlableCurrentTime
       cleaner.currentTime = 0
       cleaner.tick() should be(false)
-      cleaner.currentTime = 39
+      cleaner.currentTime = 119
       cleaner.tick() should be(false)
-      cleaner.currentTime = 40
+      cleaner.currentTime = 120
       cleaner.tick() should be(true)
       cleaner.tick() should be(false)
-      cleaner.currentTime = 239
+      cleaner.currentTime = 319
       cleaner.tick() should be(false)
-      cleaner.currentTime = 240
+      cleaner.currentTime = 320
       waitForCondition() {
         // Previous cleanup may still be running, retry until it pass or timeout
         cleaner.tick()
