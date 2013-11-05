@@ -45,13 +45,13 @@ class TestLogQueue extends FlatSpec {
 
     // Execute specified test with a log queue factory. The test can create multiple queue instances but must stop
     // using the previously created instance. All queue instances are backed by the same log files.
-    def withQueueFactory(test: (() => LogQueue) => Any) {
+    def withQueueFactory(test: (() => LogQueue) => Any, logCleanFrequencyInMs: Long = Long.MaxValue) {
       var queues: List[Queue] = Nil
       val dataDir = Files.createTempDirectory("TestLogQueue").toFile
       try {
 
         def createQueue: LogQueue = {
-          val queue = LogQueue.create(dataDir)(token = 0, definition, service)
+          val queue = LogQueue.create(dataDir, logCleanFrequencyInMs = logCleanFrequencyInMs)(token = 0, definition, service)
           queues = queue :: queues
           queue.start()
           queue.feeder.init(definition.taskContext)
@@ -65,18 +65,37 @@ class TestLogQueue extends FlatSpec {
       }
     }
 
-    /**
-     * Wait until specified feeder is ready to produce non empty data or the timeout is reach.
-     */
-    def waitForFeederData(feeder: Feeder, timeoutInMs: Long = 2000L, sleepTimeInMs: Long = 50L) {
+    def waitForCondition(timeoutInMs: Long = 2000L, sleepTimeInMs: Long = 50L)(predicate: => Boolean) {
       val startTime = System.currentTimeMillis()
-      while (feeder.peek().isEmpty) {
+      while (!predicate) {
         val elapseTime = System.currentTimeMillis() - startTime
         if (elapseTime > timeoutInMs) {
           throw new RuntimeException(s"Timeout waiting for condition after $elapseTime ms.")
         }
         Thread.sleep(sleepTimeInMs)
       }
+    }
+
+    /**
+     * Wait until specified feeder is ready to produce non empty data or the timeout is reach.
+     */
+    def waitForFeederData(feeder: Feeder, timeoutInMs: Long = 2000L, sleepTimeInMs: Long = 50L) {
+      waitForCondition(timeoutInMs, sleepTimeInMs) {
+        feeder.peek().nonEmpty
+      }
+    }
+
+    /**
+     * Add a task item in a new queue instance. Can be used to simulate file rolling.
+     */
+    def enqueueInNewQueue(item: QueueItem.Task)(implicit createQueue: () => LogQueue): QueueItem.Task = {
+      val queue = createQueue()
+      // Empty the feeder before writing the item so wait unblock when the new item is readable
+      queue.feeder.take(20).toList
+      queue.enqueue(item)
+      waitForFeederData(queue.feeder)
+      queue.stop()
+      item
     }
   }
 
@@ -85,7 +104,9 @@ class TestLogQueue extends FlatSpec {
    */
   implicit class QueueStatsVerifier(stats: QueueStats) extends QueueStats {
     def totalTasks = stats.totalTasks
+
     def pendingTasks = stats.pendingTasks
+
     def delayedTasks = stats.delayedTasks
 
     def verifyEqualsTo(totalTasks: Int, pendingTasks: Iterable[QueueItem.Task] = Nil,
@@ -127,19 +148,32 @@ class TestLogQueue extends FlatSpec {
       queue2.feeder.take(20).flatten.toList should be(List(t1, t2, t3).map(_.toFeederData))
       queue2.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = List(t1, t2, t3))
 
-      // Ack first task (queue + feeder)
-      queue2.ack(t1.toAck(ackId = 4L))
-      queue2.feeder.ack(t1.toFeederData)
-      queue2.stats.verifyEqualsTo(totalTasks = 2, pendingTasks = List(t2, t3))
+      // Ack second task (queue + feeder)
+      val a4 = queue2.ack(t2.toAck(ackId = 4L))
+      queue2.feeder.ack(t2.toFeederData)
+      queue2.stats.verifyEqualsTo(totalTasks = 2, pendingTasks = List(t1, t3))
       queue2.stop()
 
       // ####################
-      // Create a new queue instance again. Should reload the state after first task ack.
+      // Create a new queue instance again. Should reload the state after task ack.
       val queue3 = createQueue()
       waitForFeederData(queue3.feeder)
       queue3.stats.verifyEqualsTo(totalTasks = 2, pendingTasks = Nil)
-      queue3.feeder.take(20).flatten.toList should be(List(t2, t3).map(_.toFeederData))
-      queue3.stats.verifyEqualsTo(totalTasks = 2, pendingTasks = List(t2, t3))
+      queue3.feeder.take(20).flatten.toList should be(List(t1, t3).map(_.toFeederData))
+      queue3.stats.verifyEqualsTo(totalTasks = 2, pendingTasks = List(t1, t3))
+
+      // ####################
+      // Truncate the ack and another task. After reloading the queue again, the ack task should resurect and the
+      // truncated task disapair.
+      queue3.truncateQueueItem(a4.ackId)
+      queue3.truncateQueueItem(t1.taskId)
+      queue3.stop()
+
+      val queue4 = createQueue()
+      waitForFeederData(queue4.feeder)
+      queue4.stats.verifyEqualsTo(totalTasks = 2, pendingTasks = Nil)
+      queue4.feeder.take(20).flatten.toList should be(List(t2, t3).map(_.toFeederData))
+      queue4.stats.verifyEqualsTo(totalTasks = 2, pendingTasks = List(t2, t3))
     })
   }
 
@@ -164,6 +198,55 @@ class TestLogQueue extends FlatSpec {
       val queue2 = createQueue()
       queue2.getLastQueueItemId should be(Some(Timestamp(5L)))
     })
+  }
+
+  it should "return last non-truncated queue item identifier" in new QueueService {
+    withQueueFactory { implicit createQueue =>
+
+      // Simulate file rolling by adding each task item in a new queue instance,
+      val t1 = enqueueInNewQueue(task(taskId = 1L, priority = 1))
+      val t2 = enqueueInNewQueue(task(taskId = 2L, priority = 1))
+      val t3 = enqueueInNewQueue(task(taskId = 3L, priority = 1))
+      val t4 = enqueueInNewQueue(task(taskId = 4L, priority = 1))
+
+      val queue1 = createQueue()
+      queue1.feeder.take(20).toList // Load all items with feeder before acknowledging them
+
+      val a8_t2 = queue1.ack(t2.toAck(8L))
+      val a5_t1 = queue1.ack(t1.toAck(5L))
+      val a7_t3 = queue1.ack(t3.toAck(7L))
+      val a6_t4 = queue1.ack(t4.toAck(6L))
+      val t9 = enqueueInNewQueue(task(taskId = 9L, priority = 1))
+
+      // Truncate last id and verify proceeding id now the last (repeat until all items are truncated)
+      val queue2 = createQueue()
+      queue2.truncateQueueItem(t9.itemId)
+      queue2.getLastQueueItemId should be(Some(a8_t2.itemId))
+
+      queue2.truncateQueueItem(a8_t2.itemId)
+      queue2.getLastQueueItemId should be(Some(a7_t3.itemId))
+
+      queue2.truncateQueueItem(a7_t3.itemId)
+      queue2.getLastQueueItemId should be(Some(a6_t4.itemId))
+
+      queue2.truncateQueueItem(a6_t4.itemId)
+      queue2.getLastQueueItemId should be(Some(a5_t1.itemId))
+
+      queue2.truncateQueueItem(a5_t1.itemId)
+      queue2.getLastQueueItemId should be(Some(t4.itemId))
+
+      queue2.truncateQueueItem(t4.itemId)
+      queue2.getLastQueueItemId should be(Some(t3.itemId))
+
+      queue2.truncateQueueItem(t3.itemId)
+      queue2.getLastQueueItemId should be(Some(t2.itemId))
+
+      queue2.truncateQueueItem(t2.itemId)
+      queue2.getLastQueueItemId should be(Some(t1.itemId))
+
+      queue2.truncateQueueItem(t1.itemId)
+      queue2.getLastQueueItemId should be(None)
+    }
   }
 
   it should "read queue items ordered by id with mixed priorities" in new QueueService {
@@ -216,24 +299,41 @@ class TestLogQueue extends FlatSpec {
     })
   }
 
-  it should "read queue items queued in different log files" in new QueueService {
+  it should "read queue items with some truncated" in new QueueService {
     withQueueFactory(createQueue => {
+      val queue1 = createQueue()
+
+      val t3 = queue1.enqueue(task(taskId = 3L, priority = 1))
+      val t1 = queue1.enqueue(task(taskId = 1L, priority = 2))
+      val t4 = queue1.enqueue(task(taskId = 4L, priority = 2))
+      val t2 = queue1.enqueue(task(taskId = 2L, priority = 1))
+      waitForFeederData(queue1.feeder)
+      queue1.feeder.take(20).toList // Load all items with feeder before acknowledging them
+
+      val a8_t2 = queue1.ack(t2.toAck(8L))
+      val a5_t1 = queue1.ack(t1.toAck(5L))
+      val a7_t3 = queue1.ack(t3.toAck(7L))
+      val a6_t4 = queue1.ack(t4.toAck(6L))
+      queue1.truncateQueueItem(a5_t1.itemId)
+      queue1.truncateQueueItem(a7_t3.itemId)
+      val t9 = queue1.enqueue(task(taskId = 9L, priority = 2))
+      waitForFeederData(queue1.feeder)
+
+      val readItems = using(queue1.readQueueItems(startItemId = t3.taskId, endItemId = t9.taskId)) { reader =>
+        reader.toList
+      }
+      readItems should be(List(t3, t4, a6_t4, a8_t2, t9))
+    })
+  }
+
+  it should "read queue items queued in different log files" in new QueueService {
+    withQueueFactory { implicit createQueue =>
 
       // Simulate file rolling by adding each task item in a new queue instance,
-      def enqueue(item: QueueItem.Task): QueueItem.Task = {
-        val queue = createQueue()
-        // Empty the feeder before writing the item so wait unblock when the new item is readable
-        queue.feeder.take(20).toList
-        queue.enqueue(item)
-        waitForFeederData(queue.feeder)
-        queue.stop()
-        item
-      }
-
-      val t1 = enqueue(task(taskId = 1L, priority = 1))
-      val t2 = enqueue(task(taskId = 2L, priority = 1))
-      val t3 = enqueue(task(taskId = 3L, priority = 1))
-      val t4 = enqueue(task(taskId = 4L, priority = 1))
+      val t1 = enqueueInNewQueue(task(taskId = 1L, priority = 1))
+      val t2 = enqueueInNewQueue(task(taskId = 2L, priority = 1))
+      val t3 = enqueueInNewQueue(task(taskId = 3L, priority = 1))
+      val t4 = enqueueInNewQueue(task(taskId = 4L, priority = 1))
 
       val queue1 = createQueue()
       queue1.feeder.take(20).toList // Load all items with feeder before acknowledging them
@@ -242,13 +342,14 @@ class TestLogQueue extends FlatSpec {
       val a5_t1 = queue1.ack(t1.toAck(5L))
       val a7_t3 = queue1.ack(t3.toAck(7L))
       val a6_t4 = queue1.ack(t4.toAck(6L))
-      val t9 = enqueue(task(taskId = 9L, priority = 1))
+      val t9 = enqueueInNewQueue(task(taskId = 9L, priority = 1))
 
-      val readItems = using(createQueue().readQueueItems(startItemId = a6_t4.ackId, endItemId = t9.taskId)) { reader =>
+      val queue2 = createQueue()
+      val readItems = using(queue2.readQueueItems(startItemId = a6_t4.ackId, endItemId = t9.taskId)) { reader =>
         reader.toList
       }
       readItems should be(List(a6_t4, a7_t3, a8_t2, t9))
-    })
+    }
   }
 
   it should "write queue items" in new QueueService {
@@ -365,6 +466,41 @@ class TestLogQueue extends FlatSpec {
       queue1.oldestItemIdFor(priority = 1) should be(Some(Timestamp(4L)))
       queue1.oldestItemIdFor(priority = 2) should be(None)
     })
+  }
+
+  it should "get oldest log consistent timestamp" in new QueueService {
+
+    withQueueFactory(createQueue => test(createQueue), logCleanFrequencyInMs = 1)
+
+    def test(implicit createQueue: () => LogQueue) {
+      // Simulate file rolling by adding each task item in a new queue instance,
+      val t1 = enqueueInNewQueue(task(taskId = 1L, priority = 1))
+      val t2 = enqueueInNewQueue(task(taskId = 2L, priority = 1))
+      val t3 = enqueueInNewQueue(task(taskId = 3L, priority = 1))
+      val t4 = enqueueInNewQueue(task(taskId = 4L, priority = 1))
+
+      // Ack tasks
+      val queue1 = createQueue()
+      queue1.feeder.take(20).toList // Load all items with feeder before acknowledging them
+      queue1.oldestLogConsistentTimestamp should be(Some(Timestamp(1L)))
+      queue1.ack(t2.toAck(8L))
+      queue1.feeder.ack(t2.toFeederData)
+      queue1.ack(t1.toAck(5L))
+      queue1.feeder.ack(t1.toFeederData)
+      queue1.ack(t3.toAck(7L))
+      queue1.feeder.ack(t3.toFeederData)
+      queue1.ack(t4.toAck(6L))
+      queue1.feeder.ack(t4.toFeederData)
+      queue1.stop()
+      val t9 = enqueueInNewQueue(task(taskId = 9L, priority = 1))
+
+      // Ack the last task, this will trigger log cleanup
+      val queue2 = createQueue()
+      queue2.ack(t9.toAck(10L))
+      waitForCondition() {
+        queue2.oldestLogConsistentTimestamp == Some(Timestamp(2L))
+      }
+    }
   }
 
   it should "rewrite log tail if not properly finalized" in pending
