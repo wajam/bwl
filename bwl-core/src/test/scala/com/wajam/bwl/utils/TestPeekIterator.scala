@@ -26,9 +26,8 @@ class TestPeekIterator extends FlatSpec with MockitoSugar {
 
   "Non-empty iterator" should "behave properly with one item" in {
     val itr = PeekIterator(Iterator(1))
+    itr.peek should be(1)
     itr.hasNext should be(true)
-    itr.hasNext should be(true)
-
     itr.peek should be(1)
     itr.next() should be(1)
 
@@ -46,7 +45,7 @@ class TestPeekIterator extends FlatSpec with MockitoSugar {
   it should "behave properly with multiples items" in {
     val itr = PeekIterator(Iterator(1, 2, 3))
     itr.hasNext should be(true)
-    itr.hasNext should be(true)
+    itr.hasNext should be(true) // Call twice to ensure hasNext does not advance the cursor
 
     itr.peek should be(1)
     itr.next() should be(1)
@@ -58,14 +57,6 @@ class TestPeekIterator extends FlatSpec with MockitoSugar {
     itr.peek should be(3)
     itr.next() should be(3)
     itr.hasNext should be(false)
-
-    evaluating {
-      itr.next()
-    } should produce[NoSuchElementException]
-
-    evaluating {
-      itr.peek
-    } should produce[NoSuchElementException]
   }
 
   "Closable iterator" should "be closed" in {
