@@ -43,6 +43,11 @@ object ClosablePeekIterator {
  */
 class PeekIteratorOrdering[T](implicit ord: Ordering[T]) extends Ordering[PeekIterator[T]] {
   def compare(x: PeekIterator[T], y: PeekIterator[T]) = {
-    ord.compare(x.peek, y.peek)
+    (x.hasNext, y.hasNext) match {
+      case (true, true) => ord.compare(x.peek, y.peek)
+      case (true, false) => 1
+      case (false, true) => -1
+      case (false, false) => 0
+    }
   }
 }
