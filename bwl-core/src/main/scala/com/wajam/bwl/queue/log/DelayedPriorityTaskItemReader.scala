@@ -4,7 +4,7 @@ import com.wajam.nrv.consistency.TransactionRecorder
 import com.wajam.bwl.queue.log.DelayedPriorityTaskItemReader.InfiniteEmptyPriorityTaskItemReader
 
 /**
- * Queue reader wrapper which ensure that log exists and is NOT empty before creating the real LogQueueReader.
+ * Queue reader wrapper which ensure that log exists and is NOT empty before creating the real PriorityTaskItemReader.
  * Achieved by waiting until TransactionRecorder produces a valid consistent timestamp.
  */
 class DelayedPriorityTaskItemReader(recorder: TransactionRecorder, createReader: => PriorityTaskItemReader)

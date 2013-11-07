@@ -4,7 +4,6 @@ import com.wajam.bwl.queue.QueueItem
 import com.wajam.commons.Closable
 import com.wajam.nrv.consistency.replication.ReplicationSourceIterator
 import com.wajam.bwl.queue.log.LogQueue._
-import com.wajam.nrv.service.Service
 import com.wajam.bwl.utils.PeekIterator
 import com.wajam.nrv.utils.timestamp.Timestamp
 
@@ -12,7 +11,7 @@ import com.wajam.nrv.utils.timestamp.Timestamp
  * Multiplex the specified transaction log source iterators, one per priority, into a single log item iterators.
  * Items are ordered by ascending item id.
  */
-class QueueItemReader(service: Service, maxItemId: Timestamp, prioritySources: Map[Int, ReplicationSourceIterator])
+class QueueItemReader(maxItemId: Timestamp, prioritySources: Map[Int, ReplicationSourceIterator])
     extends Iterator[QueueItem] with Closable {
 
   private val priorityItems: Map[Int, PeekIterator[QueueItem]] =
@@ -31,7 +30,7 @@ class QueueItemReader(service: Service, maxItemId: Timestamp, prioritySources: M
     implicit val ord = Ordering[Option[Timestamp]]
     val maxTimestamp = Some(maxItemId)
     val items: Iterator[QueueItem] = itr.takeWhile(
-      msg => msg.isDefined && msg.get.timestamp <= maxTimestamp).flatten.flatMap(message2item(_, service))
+      msg => msg.isDefined && msg.get.timestamp <= maxTimestamp).flatten.flatMap(message2item)
     PeekIterator(items)
   }
 }
