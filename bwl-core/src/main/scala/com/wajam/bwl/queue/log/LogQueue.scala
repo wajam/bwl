@@ -26,7 +26,7 @@ import java.util.concurrent.{ TimeUnit, Executors }
 /**
  * Persistent queue using NRV transaction log as backing storage. Each priority is appended to separate log.
  */
-class LogQueue(val token: Long, service: Service, val definition: QueueDefinition, recorderFactory: RecorderFactory,
+class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory: RecorderFactory,
                logCleanFrequencyInMs: Long, truncateTracker: TruncateTracker)(implicit random: Random = Random)
     extends ConsistentQueue with Logging {
 
@@ -164,7 +164,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
       }
     }.toMap
 
-    val reader = new QueueItemReader(service, endItemId, sources)
+    val reader = new QueueItemReader(endItemId, sources)
     new PeekIterator(reader) with Closable {
       // Keep track of the open read iterators to ensure the cleanup job is not deleted files while they are read.
       // Use PeekIterator so the cleanup job knows the next queue item read without consuming it.
@@ -210,7 +210,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
         case Some(msg) => !truncateTracker.contains(msg.timestamp.get)
         case None => true
       }
-      PriorityTaskItemReader(service, itr, processed)
+      PriorityTaskItemReader(itr, processed)
     }
 
     new DelayedPriorityTaskItemReader(recorder, createLogTaskReader)
@@ -243,7 +243,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
 
         if (itr.hasNext) itr.next() match {
           case Some(msg) => {
-            val (itemId, all, processed) = message2item(msg, service) match {
+            val (itemId, all, processed) = message2item(msg) match {
               case Some(taskItem: QueueItem.Task) if taskItem.taskId <= endTimestamp &&
                 !truncateTracker.contains(taskItem.taskId) => {
                 (taskItem.taskId, allItems + taskItem.taskId, processedItems)
@@ -445,10 +445,10 @@ object LogQueue {
       new TransactionRecorder(memberFor(priority), txLogFor(priority), consistencyDelay, service.responseTimeout, logCommitFrequency, {})
     }
 
-    new LogQueue(token, service, definition, recorderFactory, logCleanFrequencyInMs, truncateTracker)
+    new LogQueue(token, definition, recorderFactory, logCleanFrequencyInMs, truncateTracker)
   }
 
-  private[log] def message2item(message: Message, service: Service): Option[QueueItem] = {
+  private[log] def message2item(message: Message): Option[QueueItem] = {
     import com.wajam.nrv.extension.resource.ParamsAccessor._
 
     message.function match {
