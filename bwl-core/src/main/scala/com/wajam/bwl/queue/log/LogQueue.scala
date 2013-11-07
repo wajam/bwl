@@ -297,6 +297,11 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
       debug(s"Starting queue '$token:$name'")
       recorders.valuesIterator.foreach(_.start())
 
+      // The only case we truncate is after the recovery process (on service member up when we check the log and the
+      // store (the queue) timestamps and possibly truncate record that are in the LogQueue but not in the transaction
+      // logs. So if there are no replication, the tracker will always be empty. Also, this means that the tracker
+      // timestamp set should be fairly small at all time (which means we do not need to worry about keeping that
+      // in memory and compacting only on restart).
       truncateTracker.compact(oldestLogConsistentTimestamp)
     }
   }
@@ -331,16 +336,19 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   private def getLastNonTruncatedQueueItemId(txLog: FileTransactionLog): Option[Timestamp] = {
     import com.wajam.commons.Closable.using
 
-    // Iterate log files in reverse order to find last non-truncated record. Stop at the first log file which
-    // contains an un-truncated record.
-    txLog.getLogFiles.toList.reverse.toIterator.flatMap { file =>
+    def maxNonTruncatedQueueItemStartingAt(file: File): Option[Timestamp] = {
       val fileIndex = txLog.getIndexFromName(file.getName)
       using(txLog.read(fileIndex).toSafeIterator) { itr =>
         itr.collect {
           case record: TimestampedRecord if !truncateTracker.contains(record.timestamp) => record.timestamp
         }.reduceOption(Ordering[Timestamp].max)
       }
-    }.collectFirst { case timestamp => timestamp }
+    }
+
+    // Iterate log files in reverse order to find last non-truncated record. Stop at the first log file which
+    // contains an un-truncated record.
+    txLog.getLogFiles.toList.reverse.toIterator.flatMap(file =>
+      maxNonTruncatedQueueItemStartingAt(file)).collectFirst { case timestamp => timestamp }
   }
 
   /**

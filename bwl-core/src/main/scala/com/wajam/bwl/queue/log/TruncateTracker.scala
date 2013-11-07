@@ -14,7 +14,7 @@ import com.wajam.commons.Logging
 class TruncateTracker(persistFile: File) extends Logging {
 
   @volatile
-  private var truncated = read()
+  private var truncated: TreeSet[Timestamp] = read()
 
   /**
    * Returns true if the specified timestamp is in the truncate list
@@ -61,12 +61,19 @@ class TruncateTracker(persistFile: File) extends Logging {
   private def read(): TreeSet[Timestamp] = {
     import com.wajam.commons.Closable.using
 
-    if (persistFile.isFile) {
+    try {
       using(new FileInputStream(persistFile)) { in =>
-        val timestamps = Source.fromInputStream(in, "UTF-8").getLines().map(value => Timestamp(value.toLong))
+        val lines = Source.fromInputStream(in, "UTF-8").getLines()
+        val timestamps = lines.collect { case value if value.forall(_.isDigit) => Timestamp(value.toLong) }
         new TreeSet[Timestamp]() ++ timestamps
       }
-    } else new TreeSet[Timestamp]()
+    } catch {
+      case e: FileNotFoundException => new TreeSet[Timestamp]()
+      case e: Exception => {
+        warn(s"Error reading truncate file '${persistFile.getName}'", e)
+        new TreeSet[Timestamp]()
+      }
+    }
   }
 
   private def write(timestamps: Iterable[Timestamp]) = {

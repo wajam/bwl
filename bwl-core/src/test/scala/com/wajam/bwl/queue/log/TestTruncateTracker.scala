@@ -3,10 +3,11 @@ package com.wajam.bwl.queue.log
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
 import org.scalatest.FlatSpec
-import java.io.{ FileOutputStream, File }
+import java.io.{ PrintWriter, FileOutputStream, File }
 import java.nio.file.Files
 import org.apache.commons.io.FileUtils
 import org.scalatest.matchers.ShouldMatchers._
+import scala.util.Random
 
 @RunWith(classOf[JUnitRunner])
 class TestTruncateTracker extends FlatSpec {
@@ -37,6 +38,44 @@ class TestTruncateTracker extends FlatSpec {
       file should be('exists)
 
       new TruncateTracker(file)
+    }
+  }
+
+  it should "not fail if persisted file is corrupted" in new TempFile {
+    withFile { file =>
+
+      import com.wajam.commons.Closable.using
+
+      val random = new Random(999)
+      val buffer = new Array[Byte](256)
+      using(new FileOutputStream(file)) { out =>
+        random.nextBytes(buffer)
+        out.write(buffer)
+        random.nextBytes(buffer)
+        out.write(buffer)
+        random.nextBytes(buffer)
+        out.write(buffer)
+      }
+
+      new TruncateTracker(file)
+    }
+  }
+
+  it should "ignore corrupted timestamps" in new TempFile {
+    withFile { file =>
+
+      import com.wajam.commons.Closable.using
+
+      using(new PrintWriter(file, "UTF-8")) { writer =>
+        writer.println("1")
+        writer.println("2")
+        writer.println("a")
+        writer.println("3")
+      }
+      val tracker = new TruncateTracker(file)
+      tracker.contains(1L) should be(true)
+      tracker.contains(2L) should be(true)
+      tracker.contains(3L) should be(true)
     }
   }
 
