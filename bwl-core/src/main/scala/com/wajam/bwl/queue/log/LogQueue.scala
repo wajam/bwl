@@ -27,7 +27,8 @@ import java.util.concurrent.{ TimeUnit, Executors }
  * Persistent queue using NRV transaction log as backing storage. Each priority is appended to separate log.
  */
 class LogQueue(val token: Long, service: Service, val definition: QueueDefinition, recorderFactory: RecorderFactory,
-               logCleanFrequencyInMs: Long)(implicit random: Random = Random) extends ConsistentQueue with Logging {
+               logCleanFrequencyInMs: Long, truncateTracker: TruncateTracker)(implicit random: Random = Random)
+    extends ConsistentQueue with Logging {
 
   private val recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
 
@@ -108,7 +109,18 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
 
   def stats: QueueStats = LogQueueStats
 
-  def getLastQueueItemId = recorders.valuesIterator.flatMap(_.currentConsistentTimestamp).reduceOption(Ordering[Timestamp].max)
+  def getLastQueueItemId = {
+    val lastIdOpt = recorders.valuesIterator.flatMap(_.currentConsistentTimestamp).reduceOption(Ordering[Timestamp].max)
+    lastIdOpt match {
+      case Some(last) if truncateTracker.contains(last) => {
+        debug(s"Queue '$token:$name' last item '$last' is truncated. Fallback to a slower method to find non-truncated id.")
+        val timestamps: Iterator[Timestamp] = recorders.valuesIterator.flatMap(recorder =>
+          getLastNonTruncatedQueueItemId(recorder.txLog.asInstanceOf[FileTransactionLog]))
+        timestamps.reduceOption(Ordering[Timestamp].max)
+      }
+      case _ => lastIdOpt
+    }
+  }
 
   def readQueueItems(startItemId: Timestamp, endItemId: Timestamp) = {
 
@@ -140,22 +152,11 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
           }
           debug(s"Reading queue '$token:$name#$priority' log from $initialTimestamp but filtering items before $startItemId")
 
-          // Filter out items prior startItemId
-          new ReplicationSourceIterator {
-            val start = startItemId
-            val end = Some(endItemId)
-            val source = new TransactionLogReplicationIterator(recorder.member,
-              initialTimestamp, txLog, recorder.currentConsistentTimestamp)
-            val filteredSource = source.filter {
-              case Some(msg) => msg.timestamp.get >= startItemId
-              case None => true
-            }
-
-            def hasNext = filteredSource.hasNext
-
-            def next() = filteredSource.next()
-
-            def close() = source.close()
+          // Filter out items prior startItemId and truncated items
+          new TransactionLogReplicationIterator(recorder.member,
+            initialTimestamp, txLog, recorder.currentConsistentTimestamp).withFilter {
+            case Some(msg) => msg.timestamp.get >= startItemId && !truncateTracker.contains(msg.timestamp.get)
+            case None => true
           }
         }
 
@@ -182,7 +183,7 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
   }
 
   def truncateQueueItem(itemId: Timestamp) = {
-    // TODO: Implement this method.
+    truncateTracker.truncate(itemId)
   }
 
   /**
@@ -205,7 +206,10 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
       totalTaskCount.addAndGet(total)
 
       val itr = new TransactionLogReplicationIterator(recorder.member,
-        initialTimestamp, txLog, recorder.currentConsistentTimestamp)
+        initialTimestamp, txLog, recorder.currentConsistentTimestamp).withFilter {
+        case Some(msg) => !truncateTracker.contains(msg.timestamp.get)
+        case None => true
+      }
       PriorityTaskItemReader(service, itr, processed)
     }
 
@@ -240,14 +244,15 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
         if (itr.hasNext) itr.next() match {
           case Some(msg) => {
             val (itemId, all, processed) = message2item(msg, service) match {
-              case Some(taskItem: QueueItem.Task) if taskItem.taskId <= endTimestamp => {
+              case Some(taskItem: QueueItem.Task) if taskItem.taskId <= endTimestamp &&
+                !truncateTracker.contains(taskItem.taskId) => {
                 (taskItem.taskId, allItems + taskItem.taskId, processedItems)
               }
-              case Some(taskItem: QueueItem.Task) => (taskItem.taskId, allItems, processedItems)
-              case Some(ackItem: QueueItem.Ack) if allItems.contains(ackItem.taskId) => {
+              case Some(ackItem: QueueItem.Ack) if allItems.contains(ackItem.taskId) &&
+                !truncateTracker.contains(ackItem.ackId) => {
                 (ackItem.ackId, allItems - ackItem.taskId, processedItems + ackItem.taskId)
               }
-              case Some(ackItem: QueueItem.Ack) => (ackItem.ackId, allItems, processedItems)
+              case Some(item) => (item.itemId, allItems, processedItems)
             }
 
             if (itemId < endTimestamp) processNext(all, processed) else (all, processed)
@@ -291,6 +296,13 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
     if (started.compareAndSet(false, true)) {
       debug(s"Starting queue '$token:$name'")
       recorders.valuesIterator.foreach(_.start())
+
+      // The only case we truncate is after the recovery process (on service member up when we check the log and the
+      // store (the queue) timestamps and possibly truncate record that are in the LogQueue but not in the transaction
+      // logs. So if there are no replication, the tracker will always be empty. Also, this means that the tracker
+      // timestamp set should be fairly small at all time (which means we do not need to worry about keeping that
+      // in memory and compacting only on restart).
+      truncateTracker.compact(oldestLogConsistentTimestamp)
     }
   }
 
@@ -321,6 +333,24 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
     def delayedTasks = feeder.delayedTasks.toIterable
   }
 
+  private def getLastNonTruncatedQueueItemId(txLog: FileTransactionLog): Option[Timestamp] = {
+    import com.wajam.commons.Closable.using
+
+    def maxNonTruncatedQueueItemStartingAt(file: File): Option[Timestamp] = {
+      val fileIndex = txLog.getIndexFromName(file.getName)
+      using(txLog.read(fileIndex).toSafeIterator) { itr =>
+        itr.collect {
+          case record: TimestampedRecord if !truncateTracker.contains(record.timestamp) => record.timestamp
+        }.reduceOption(Ordering[Timestamp].max)
+      }
+    }
+
+    // Iterate log files in reverse order to find last non-truncated record. Stop at the first log file which
+    // contains an un-truncated record.
+    txLog.getLogFiles.toList.reverse.toIterator.flatMap(file =>
+      maxNonTruncatedQueueItemStartingAt(file)).collectFirst { case timestamp => timestamp }
+  }
+
   /**
    * Find the oldest item between the feeder task processed and the items currently being read for replication
    */
@@ -331,6 +361,26 @@ class LogQueue(val token: Long, service: Service, val definition: QueueDefinitio
     }
     // Returns the smallest of the non-empty values
     (processed ++ replicated).reduceOption(Ordering[Timestamp].min)
+  }
+
+  private[log] def oldestLogConsistentTimestamp: Option[Timestamp] = {
+
+    def getIndexesFromLogFileNames(txLog: FileTransactionLog): Iterable[Index] = {
+      txLog.getLogFiles.map(file => txLog.getIndexFromName(file.getName))
+    }
+
+    // Find the oldest known consistent timestamp for each priority by using consistent timestamp from log file names
+    val prioritiesFirstConsistentTimestamps = {
+      for {
+        recorder <- recorders.valuesIterator
+        txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
+        index <- getIndexesFromLogFileNames(txLog)
+        consistentTimestamp <- index.consistentTimestamp
+      } yield consistentTimestamp
+    }.toList
+
+    // Returns the smallest value
+    prioritiesFirstConsistentTimestamps.reduceOption(Ordering[Timestamp].min)
   }
 }
 
@@ -366,7 +416,7 @@ object LogQueue {
 
     def memberFor(priority: Priority) = {
       val ranges = ResolvedServiceMember(service, token).ranges
-      ResolvedServiceMember(queueNameFor(priority), token, ranges) // TODO: Find a better solution to override service name
+      ResolvedServiceMember(queueNameFor(priority), token, ranges)
     }
 
     /**
@@ -388,12 +438,14 @@ object LogQueue {
     // Ensure that all logs are properly finalized with an Index record
     definition.priorities.foreach(finalizeLog)
 
+    val truncateTracker = new TruncateTracker(new File(logDir.toFile, s"${definition.name}.truncate"))
+
     val recorderFactory: RecorderFactory = (token, definition, priority) => {
       Logger.debug(s"Create recorder '$token:${queueNameFor(priority)}'")
       new TransactionRecorder(memberFor(priority), txLogFor(priority), consistencyDelay, service.responseTimeout, logCommitFrequency, {})
     }
 
-    new LogQueue(token, service, definition, recorderFactory, logCleanFrequencyInMs)
+    new LogQueue(token, service, definition, recorderFactory, logCleanFrequencyInMs, truncateTracker)
   }
 
   private[log] def message2item(message: Message, service: Service): Option[QueueItem] = {
