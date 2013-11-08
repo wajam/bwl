@@ -17,6 +17,7 @@ import scala.util.Random
  * Simple memory queue. MUST not be used in production.
  */
 class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit random: Random = Random) extends Queue {
+  self =>
 
   private val selector = new PrioritySelector(priorities)
   private val queues = priorities.map(_.value -> new ConcurrentLinkedQueue[QueueItem.Task]).toMap
@@ -33,7 +34,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
 
   lazy val feeder = new Feeder {
 
-    def name = MemoryQueue.this.name
+    def name = self.name
 
     def init(context: TaskContext) {
       // No-op. Memory queues are not persisted.
@@ -75,9 +76,9 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
   def stop() {}
 
   private object MemoryQueueStats extends QueueStats {
-    def totalTasks = queues.valuesIterator.map(_.size).sum + MemoryQueue.this.pendingTasks.size
+    def totalTasks = queues.valuesIterator.map(_.size).sum + self.pendingTasks.size
 
-    def pendingTasks = MemoryQueue.this.pendingTasks.valuesIterator.toIterable
+    def pendingTasks = self.pendingTasks.valuesIterator.toIterable
 
     // TODO: support delayed tasks
     def delayedTasks = Nil
