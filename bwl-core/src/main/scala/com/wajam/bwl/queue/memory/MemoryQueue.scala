@@ -75,7 +75,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
   def stop() {}
 
   private object MemoryQueueStats extends QueueStats {
-    def totalTasks = queues.valuesIterator.map(_.size()).sum
+    def totalTasks = queues.valuesIterator.map(_.size).sum + MemoryQueue.this.pendingTasks.size
 
     def pendingTasks = MemoryQueue.this.pendingTasks.valuesIterator.toIterable
 
