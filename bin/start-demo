@@ -1,0 +1,4 @@
+#!/bin/bash
+
+export JAVA_OPTS="-XX:+UseG1GC -Dlog4j.configuration=file://$(pwd)/etc/log4j.properties -Dfile.encoding=UTF-8"
+bwl-demo/target/start com.wajam.bwl.demo.DemoApp

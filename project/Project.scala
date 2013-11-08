@@ -31,6 +31,10 @@ object BwlBuild extends Build {
     "org.mockito" % "mockito-core" % "1.9.0" % "test,it"
   )
 
+  val demoDeps = Seq(
+    "com.typesafe" % "config" % "1.0.2"
+  )
+
   def configureScalariform(pref: IFormattingPreferences): IFormattingPreferences = {
     pref.setPreference(AlignParameters, true)
       .setPreference(DoubleIndentClassDeclaration, true)
@@ -54,6 +58,7 @@ object BwlBuild extends Build {
     .settings(parallelExecution in IntegrationTest := false)
     .settings(SbtStartScript.startScriptForClassesSettings: _*)
     .aggregate(core)
+    .aggregate(demo)
 
   lazy val core = Project(PROJECT_NAME+"-core", file(PROJECT_NAME+"-core"))
     .configs(IntegrationTest)
@@ -62,4 +67,14 @@ object BwlBuild extends Build {
     .settings(parallelExecution in Test := false)
     .settings(parallelExecution in IntegrationTest := false)
     .settings(SbtStartScript.startScriptForClassesSettings: _*)
+
+  lazy val demo = Project(PROJECT_NAME+"-demo", file(PROJECT_NAME+"-demo"))
+    .configs(IntegrationTest)
+    .settings(defaultSettings ++ (libraryDependencies ++= demoDeps): _*)
+    .settings(testOptions in IntegrationTest := Seq(Tests.Filter(s => s.contains("Test"))))
+    .settings(parallelExecution in IntegrationTest := false)
+    .settings(SbtStartScript.startScriptForClassesSettings: _*)
+    .settings(unmanagedClasspath in Runtime <+= baseDirectory map { bd => Attributed.blank(bd / "../etc") })
+    .settings(unmanagedClasspath in IntegrationTest <+= baseDirectory map { bd => Attributed.blank(bd / "../etc") })
+    .dependsOn(core)
 }
