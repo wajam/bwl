@@ -22,7 +22,11 @@ class TruncateTracker(persistFile: File) extends Logging {
   def contains(timestamp: Timestamp): Boolean = truncated.contains(timestamp)
 
   /**
-   * Add specified timestamp in truncate list
+   * Add specified timestamp in truncate list.
+   * <br/>
+   * <br/><b>IMPORTANT:</b> This method is a building block to implement the
+   * `ConsistentStore.truncateAt` method and MUST NEVER be used for other purposes. The `truncateAt` method is
+   * invoked when the service is not Up which prevent inconsistencies.
    */
   def truncate(timestamp: Timestamp) = synchronized {
     import com.wajam.commons.Closable.using
