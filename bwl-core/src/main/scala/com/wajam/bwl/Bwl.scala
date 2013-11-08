@@ -11,7 +11,7 @@ import com.wajam.bwl.queue.QueueDefinition
 import com.wajam.nrv.data.MInt
 import com.wajam.commons.Logging
 
-class Bwl(serviceName: String, val definitions: Iterable[QueueDefinition], protected val createQueue: QueueFactory,
+class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefinition], protected val createQueue: QueueFactory,
           spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)
     extends Service(serviceName) with Logging {
 

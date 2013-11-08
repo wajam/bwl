@@ -6,14 +6,14 @@ import com.wajam.bwl.Bwl
 import com.wajam.nrv.data.{ MValue, InMessage }
 import scala.concurrent.ExecutionContext
 import com.wajam.commons.Logging
-import com.wajam.bwl.queue.QueueTask
+import com.wajam.bwl.queue.{QueueDefinition, QueueTask}
 import scala.compat.Platform.EOL
 
-class DemoResource(bwl: Bwl)(implicit ec: ExecutionContext)
+class DemoResource(bwl: Bwl, definitions: Iterable[QueueDefinition])(implicit ec: ExecutionContext)
     extends Resource("queues", "name") with Update with Index with Logging {
 
   protected def index = (message: InMessage) => {
-    val data = bwl.definitions.map { definition =>
+    val data = definitions.map { definition =>
       s"${definition.name} ${definition.priorities.map(_.value).mkString("[", ",", "]")}"
     }.mkString("", EOL, EOL)
     respond(message, data)
