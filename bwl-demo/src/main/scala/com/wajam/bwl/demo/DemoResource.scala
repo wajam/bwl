@@ -6,7 +6,7 @@ import com.wajam.bwl.Bwl
 import com.wajam.nrv.data.{ MValue, InMessage }
 import scala.concurrent.ExecutionContext
 import com.wajam.commons.Logging
-import com.wajam.bwl.queue.{QueueDefinition, QueueTask}
+import com.wajam.bwl.queue.{ QueueDefinition, QueueTask }
 import scala.compat.Platform.EOL
 
 class DemoResource(bwl: Bwl, definitions: Iterable[QueueDefinition])(implicit ec: ExecutionContext)

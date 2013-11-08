@@ -110,7 +110,7 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
 
   private def createService(name: String): Service = {
     val service = new Service(name)
-    val demoResource = new DemoResource(bwlService)
+    val demoResource = new DemoResource(bwlService, definitions)
     service.registerResources(demoResource)
     service
   }
