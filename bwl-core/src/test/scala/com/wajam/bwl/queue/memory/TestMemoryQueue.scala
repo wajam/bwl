@@ -1,26 +1,18 @@
 package com.wajam.bwl.queue.memory
 
 import scala.concurrent.Future
+import scala.util.Random
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
 import org.scalatest.FlatSpec
 import org.scalatest.matchers.ShouldMatchers._
 import org.scalatest.mock.MockitoSugar
-import com.wajam.bwl.queue.{QueueItem, Priority, QueueTask, QueueDefinition}
-import com.wajam.bwl.FeederTestHelper._
 import com.wajam.nrv.service.Service
+import com.wajam.bwl.queue.{QueueItem, QueueTask}
+import com.wajam.bwl.FeederTestHelper._
 import com.wajam.bwl.QueueStatsHelper
-import org.mockito.stubbing.Answer
-import org.mockito.invocation.InvocationOnMock
-import com.wajam.nrv.utils.timestamp.Timestamp
-import com.wajam.bwl.queue.log.{LogQueueFeeder, PriorityTaskItemReader}
-import org.mockito.Mockito._
 import com.wajam.bwl.queue.Priority
-import scala.Some
 import com.wajam.bwl.queue.QueueDefinition
-import scala.util.Random
-import com.wajam.spnl.TaskContext
-
 
 @RunWith(classOf[JUnitRunner])
 class TestMemoryQueue extends FlatSpec with MockitoSugar {
@@ -97,38 +89,18 @@ class TestMemoryQueue extends FlatSpec with MockitoSugar {
     queue.stats.verifyEqualsTo(totalTasks = 0, pendingTasks = Nil)
   }
 
-  it should "produce expected task priority distribution" in {
+  it should "produce expected task priority distribution" in new WithQueue {
+    val random = new Random(seed = 999)
+    override val queue = MemoryQueue.create(0, definition, mock[Service])(random)
 
-    class NextAnswerCounter(priority: Int) extends Answer[Option[QueueItem.Task]] {
-      var callsCount = 0
-
-      def answer(iom: InvocationOnMock) = {
-        callsCount += 1
-        None
-      }
+    for(priority <- 1 to 2; i <- 1 to 100) {
+      queue.enqueue(task(priority, priority))
     }
-
-    var answers: Map[Int, NextAnswerCounter] = Map()
-    def createReader(priority: Int, startTimestamp: Option[Timestamp]): PriorityTaskItemReader = {
-      val nextAnswer = new NextAnswerCounter(priority)
-      answers += priority -> nextAnswer
-
-      val mockReader = mock[PriorityTaskItemReader]
-      when(mockReader.hasNext).thenReturn(true)
-      when(mockReader.next()).thenAnswer(nextAnswer)
-      mockReader
-    }
-
-    val priorities = List(Priority(1, weight = 66), Priority(2, weight = 33))
-    implicit val random = new Random(seed = 999)
-    val feeder = new LogQueueFeeder(QueueDefinition("name", dummyCallback, priorities = priorities), createReader)
-    val context = TaskContext()
-    feeder.init(context)
 
     // take(99) results to 100 `next()` calls because feeder is peekable and reads one task ahead
-    feeder.take(99).toList
+    val items = queue.feeder.take(99).toList.flatten
 
-    answers(1).callsCount should be(63)
-    answers(2).callsCount should be(37)
+    items.count(_("data") == 1) should be(62)
+    items.count(_("data") == 2) should be(36)
   }
 }
