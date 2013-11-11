@@ -2,6 +2,7 @@ package com.wajam.bwl.queue.memory
 
 import com.wajam.bwl.queue._
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicInteger
 import com.wajam.spnl.feeder.Feeder
 import com.wajam.spnl.TaskContext
 import com.wajam.bwl.utils.PeekIterator
@@ -17,6 +18,7 @@ import scala.util.Random
  * Simple memory queue. MUST not be used in production.
  */
 class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit random: Random = Random) extends Queue {
+  self =>
 
   private val selector = new PrioritySelector(priorities)
   private val queues = priorities.map(_.value -> new ConcurrentLinkedQueue[QueueItem.Task]).toMap
@@ -24,8 +26,11 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
 
   private val randomTaskIterator = PeekIterator(Iterator.continually(queues(selector.next).poll()))
 
+  private val totalTaskCount = new AtomicInteger()
+
   def enqueue(taskItem: QueueItem.Task) = {
     queues(taskItem.priority).offer(taskItem)
+    totalTaskCount.incrementAndGet()
     taskItem
   }
 
@@ -33,7 +38,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
 
   lazy val feeder = new Feeder {
 
-    def name = MemoryQueue.this.name
+    def name = self.name
 
     def init(context: TaskContext) {
       // No-op. Memory queues are not persisted.
@@ -62,10 +67,13 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
 
     def ack(data: FeederData) {
       val taskId = data(TaskId).toString.toLong
+      if(isPending(taskId)) totalTaskCount.decrementAndGet()
       pendingTasks -= taskId
     }
 
     def kill() {}
+
+    def isPending(taskId: Timestamp): Boolean = pendingTasks.contains(taskId)
   }
 
   def stats: QueueStats = MemoryQueueStats
@@ -75,9 +83,9 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
   def stop() {}
 
   private object MemoryQueueStats extends QueueStats {
-    def totalTasks = queues.valuesIterator.map(_.size()).sum
+    def totalTasks = totalTaskCount.get()
 
-    def pendingTasks = MemoryQueue.this.pendingTasks.valuesIterator.toIterable
+    def pendingTasks = self.pendingTasks.valuesIterator.toIterable
 
     // TODO: support delayed tasks
     def delayedTasks = Nil
