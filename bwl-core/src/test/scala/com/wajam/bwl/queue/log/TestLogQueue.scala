@@ -468,7 +468,7 @@ class TestLogQueue extends FlatSpec {
     })
   }
 
-  it should "get oldest log consistent timestamp" in new QueueService {
+  it should "should be cleaned" in new QueueService {
 
     withQueueFactory(createQueue => test(createQueue), logCleanFrequencyInMs = 1)
 
@@ -483,23 +483,30 @@ class TestLogQueue extends FlatSpec {
       val queue1 = createQueue()
       queue1.feeder.take(20).toList // Load all items with feeder before acknowledging them
       queue1.oldestLogConsistentTimestamp should be(Some(Timestamp(1L)))
-      queue1.ack(t2.toAck(8L))
+      val a8_t2 = queue1.ack(t2.toAck(8L))
       queue1.feeder.ack(t2.toFeederData)
-      queue1.ack(t1.toAck(5L))
+      val a5_t1 = queue1.ack(t1.toAck(5L))
       queue1.feeder.ack(t1.toFeederData)
-      queue1.ack(t3.toAck(7L))
+      val a7_t3 = queue1.ack(t3.toAck(7L))
       queue1.feeder.ack(t3.toFeederData)
-      queue1.ack(t4.toAck(6L))
+      val a6_t4 = queue1.ack(t4.toAck(6L))
       queue1.feeder.ack(t4.toFeederData)
       queue1.stop()
       val t9 = enqueueInNewQueue(task(taskId = 9L, priority = 1))
 
-      // Ack the last task, this will trigger log cleanup
+      // Ack the last task, this will trigger cleanup of the first two log files
       val queue2 = createQueue()
       queue2.ack(t9.toAck(10L))
       waitForCondition() {
         queue2.oldestLogConsistentTimestamp == Some(Timestamp(2L))
       }
+
+      // Try reading from the beginning. It should start from a safe position (i.e. first record having its
+      // consistent timestamp still present in log files)
+      val readItems = using(queue2.readQueueItems(startItemId = 1L, endItemId = t9.taskId)) { reader =>
+        reader.toList
+      }
+      readItems should be(List(t4, a5_t1, a6_t4, a7_t3, a8_t2, t9))
     }
   }
 

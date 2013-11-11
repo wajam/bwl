@@ -8,7 +8,7 @@ import java.io.File
 import java.nio.file.{ Files, Paths }
 import com.wajam.nrv.consistency._
 import com.wajam.nrv.service.{ TokenRange, Service }
-import com.wajam.nrv.consistency.log.{ TimestampedRecord, FileTransactionLog }
+import com.wajam.nrv.consistency.log.{ LogRecord, TimestampedRecord, FileTransactionLog }
 import com.wajam.nrv.consistency.replication.{ ReplicationSourceIterator, TransactionLogReplicationIterator }
 import com.wajam.bwl.QueueResource._
 import com.wajam.bwl.queue.Priority
@@ -284,11 +284,28 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
 
     using(txLog.read) { itr =>
       implicit val ord = Ordering[Option[Timestamp]]
-      val firstTimestamp = txLog.firstRecord(timestamp = None).map(_.timestamp)
-      val startRange = itr.takeWhile(_.consistentTimestamp < firstTimestamp).collect {
+
+      val firstRecordTimestamp = txLog.firstRecord(timestamp = None).map(_.timestamp)
+
+      val cleaned = txLog.getIndexFromName(txLog.getLogFiles.head.getName).consistentTimestamp.nonEmpty
+      val (initialRangeFirstTimestamp: Option[Timestamp], initialRange: Iterator[LogRecord]) = if (cleaned) {
+        // Log files has been cleaned at least once i.e. the first record consistent timestamp refer to a record
+        // written in a now deleted log file. We skip all records with a consistent timestamp smaller than the first
+        // record timestamp to ensure that the computed `startTimestamp` consistent timestamp exist. Necessary
+        // or `TransactionLogReplicationIterator` will fail because it tries to read starting at the
+        // `startTimestamp` consistent timestamp .
+        val initialRange: PeekIterator[TimestampedRecord] =
+          PeekIterator(itr.dropWhile(_.consistentTimestamp < firstRecordTimestamp).collect { case r: TimestampedRecord => r })
+        val initialRangeFirstTimestamp = if (initialRange.hasNext) Some(initialRange.peek.timestamp) else None
+        (initialRangeFirstTimestamp, initialRange)
+      } else {
+        (firstRecordTimestamp, itr)
+      }
+
+      val initialTimestamp = initialRange.takeWhile(_.consistentTimestamp < initialRangeFirstTimestamp).collect {
         case r: TimestampedRecord => r.timestamp.value
       }.min
-      startRange
+      initialTimestamp
     }
   }
 
