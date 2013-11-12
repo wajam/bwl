@@ -8,6 +8,7 @@ import scala.concurrent.ExecutionContext
 import com.wajam.commons.Logging
 import com.wajam.bwl.queue.{ QueueDefinition, QueueTask }
 import scala.compat.Platform.EOL
+import com.wajam.nrv.service.Resolver
 
 class DemoResource(bwl: Bwl, definitions: Iterable[QueueDefinition])(implicit ec: ExecutionContext)
     extends Resource("queues", "name") with Update with Index with Logging {
@@ -26,8 +27,10 @@ class DemoResource(bwl: Bwl, definitions: Iterable[QueueDefinition])(implicit ec
 
     val name = params.param[String]("name")
     val priority = params.optionalParam[Int]("priority")
-    val data = message.getData[Any]
-    val enqueueFuture = bwl.enqueue(message.token, name, data, priority)
+    val data = message.getData[String]
+    val token = Resolver.hashData(data)
+
+    val enqueueFuture = bwl.enqueue(token, name, data, priority)
 
     enqueueFuture onSuccess {
       case id => respond(message, id.toString + EOL)

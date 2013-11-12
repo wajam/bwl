@@ -6,7 +6,7 @@ import com.wajam.nrv.cluster.{ StaticClusterManager, ClusterManager, Cluster, Lo
 import com.wajam.nrv.protocol._
 import com.wajam.nrv.extension.resource._
 import com.wajam.nrv.protocol.codec.StringCodec
-import com.wajam.spnl.Spnl
+import com.wajam.spnl._
 import com.wajam.bwl.Bwl
 import com.wajam.bwl.queue.QueueDefinition
 import com.wajam.bwl.queue.log.LogQueue
@@ -22,7 +22,7 @@ object Demo extends App with Logging {
   import scala.concurrent.ExecutionContext.Implicits.global
 
   PropertyConfigurator.configureAndWatch("etc/log4j.properties", 5000)
-  log.info("Bwl movement")
+  log.info("Initializing Bwl movement")
 
   val config: DemoConfig = new DemoConfig(ConfigFactory.load())
   val server = new DemoServer(config)
@@ -41,12 +41,14 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
 
   val spnl = new Spnl()
 
-  val definitions = List(QueueDefinition("single", new DemoResource.Callback("single")))
+  val queueDefinitions = List(QueueDefinition("single", new DemoResource.Callback("single")))
 
-  val bwlService = new Bwl("bwl",
-    definitions,
-    LogQueue.create(new File(config.getBwlLogQueueDirectory)),
-    spnl)
+  val queueFactory = LogQueue.create(new File(config.getBwlLogQueueDirectory),
+    config.getBwlLogQueueLogfileRolloverSize,
+    config.getBwlLogQueueLogfileCommitFrequency,
+    config.getBwlLogQueueLogfileCleanFrequency) _
+
+  val bwlService = new Bwl("bwl", queueDefinitions, queueFactory, spnl, createSpnlPersistenceFactory())
 
   val demoService = createService("demo")
 
@@ -72,11 +74,17 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
     cluster.stop(config.getClusterShutdownTimeout)
   }
 
+  private def createSpnlPersistenceFactory(): TaskPersistenceFactory = {
+    config.getClusterManager match {
+      case "static" => new NoTaskPersistenceFactory
+      case "zookeeper" => new ZookeeperTaskPersistenceFactory(new ZookeeperClient(config.getZookeeperServers))
+    }
+  }
+
   private def createClusterManager(): ClusterManager = {
     config.getClusterManager match {
       case "static" => {
         val clusterManager = new StaticClusterManager
-        clusterManager.addMembers(demoService, config.getDemoClusterMembers)
         clusterManager.addMembers(bwlService, config.getBwlClusterMembers)
         clusterManager
       }
@@ -110,7 +118,7 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
 
   private def createService(name: String): Service = {
     val service = new Service(name)
-    val demoResource = new DemoResource(bwlService, definitions)
+    val demoResource = new DemoResource(bwlService, queueDefinitions)
     service.registerResources(demoResource)
     service
   }

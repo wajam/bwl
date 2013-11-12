@@ -17,7 +17,9 @@ class DemoConfig(config: Config) {
   def getProtocolHttpConnectionTimeoutMs: Int = config.getInt("nrv.protocol.http.connection.timeout-ms")
   def getProtocolHttpConnectionPoolMaxSize: Int = config.getInt("nrv.protocol.http.connection.pool.max-size")
 
-  def getDemoClusterMembers: List[String] = config.getStringList("demo.cluster.members").toList
   def getBwlClusterMembers: List[String] = config.getStringList("bwl.cluster.members").toList
   def getBwlLogQueueDirectory: String = config.getString("bwl.log-queue.directory")
+  def getBwlLogQueueLogfileRolloverSize: Int = config.getInt("bwl.log-queue.logfile-rollover-size-bytes")
+  def getBwlLogQueueLogfileCommitFrequency: Int = config.getInt("bwl.log-queue.logfile-commit-frequency-ms")
+  def getBwlLogQueueLogfileCleanFrequency: Int = config.getInt("bwl.log-queue.logfile-clean-frequency-ms")
 }
