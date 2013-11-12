@@ -110,11 +110,11 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
 
     def executeIfCallbackNotExpired(function: => Any) {
       val elapsedTime = System.currentTimeMillis() - startTime
-      trace(s"'Task ${definition.name}:$priority:$taskId' callback elapsedTime: $elapsedTime")
+      trace(s"'Task $taskId ($taskToken:${definition.name}#$priority) callback elapsedTime: $elapsedTime")
       if (elapsedTime < callbackTimeout) {
         function
       } else {
-        warn(s"Task '${definition.name}:$priority:$taskId' callback took too much time to execute ($elapsedTime ms)")
+        warn(s"Task $taskId ($taskToken:${definition.name}#$priority) $taskId' callback took too much time to execute ($elapsedTime ms)")
       }
     }
 

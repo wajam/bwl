@@ -121,10 +121,10 @@ trait ConsistentBwl extends ConsistentStore with Startable {
   }
 
   abstract override def start() = {
-    super.start()
-
     // TODO: Also update the cache when a shard is split (i.e. NewMemberAddedEvent)
     updateRangeMemberCache()
+
+    super.start()
   }
 
   private def allConsistentQueuesFor(member: ServiceMember): Iterator[ConsistentQueue] = {

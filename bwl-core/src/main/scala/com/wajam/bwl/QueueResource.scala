@@ -39,7 +39,10 @@ class QueueResource(getQueue: => (Long, String) => Option[Queue], getDefinition:
     val memberToken = getMember(ackItem.token).token
 
     getQueue(memberToken, ackItem.name) match {
-      case Some(queue: Queue) => queue.ack(message2ack(params))
+      case Some(queue: Queue) => {
+        queue.ack(message2ack(params))
+        message.reply(Map())
+      }
       case None => throw new InvalidParameter(s"No queue '${ackItem.name}' for shard $memberToken")
     }
   }
