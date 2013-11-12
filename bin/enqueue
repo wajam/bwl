@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# Enqueue N messages to BWL demo server running locally with the reference configuration.
+#
+# Usage: ./enqueue <number of messages to enqueue> <optional prefix>
+# Ex: ./enqueue 3 "test "; It will enqueue the 3 following messages: "test 1", "test 2" and "test 3"
+
+for ((i=1; i<=$1; i++)); do
+    echo "$2$i"
+    curl -X PUT -d "$2$i" localhost:1974/queues/single --header "Content-Type:text/plain"
+done
