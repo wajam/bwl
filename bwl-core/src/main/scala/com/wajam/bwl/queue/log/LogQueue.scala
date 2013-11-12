@@ -8,7 +8,7 @@ import java.io.File
 import java.nio.file.{ Files, Paths }
 import com.wajam.nrv.consistency._
 import com.wajam.nrv.service.{ TokenRange, Service }
-import com.wajam.nrv.consistency.log.{ LogRecord, TimestampedRecord, FileTransactionLog }
+import com.wajam.nrv.consistency.log.{ TransactionLog, LogRecord, TimestampedRecord, FileTransactionLog }
 import com.wajam.nrv.consistency.replication.{ ReplicationSourceIterator, TransactionLogReplicationIterator }
 import com.wajam.bwl.QueueResource._
 import com.wajam.bwl.queue.Priority
@@ -140,22 +140,9 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
             def close() = {}
           }
         } else {
-          // The startItemId is may or may not exist in the priority log. The following code ensure that we start
-          // reading from an existing id prior startItemId.
-          val initialTimestamp = txLog.guessLogFile(startItemId).map(file => txLog.getIndexFromName(file.getName)) match {
-            case Some(Index(_, Some(consistentTimestamp))) => {
-              consistentTimestamp
-            }
-            case _ => {
-              findStartTimestamp(txLog)
-            }
-          }
-          debug(s"Reading queue '$token:$name#$priority' log from $initialTimestamp but filtering items before $startItemId")
-
-          // Filter out items prior startItemId and truncated items
-          new TransactionLogReplicationIterator(recorder.member,
-            initialTimestamp, txLog, recorder.currentConsistentTimestamp).withFilter {
-            case Some(msg) => msg.timestamp.get >= startItemId && !truncateTracker.contains(msg.timestamp.get)
+          // Filter out truncated items
+          createPriorityLogSourceIterator(priority, Some(startItemId), recorder.currentConsistentTimestamp).withFilter {
+            case Some(msg) => !truncateTracker.contains(msg.timestamp.get)
             case None => true
           }
         }
@@ -186,6 +173,38 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
     truncateTracker.truncate(itemId)
   }
 
+  private def createPriorityLogSourceIterator(priority: Int, startTimestamp: Option[Timestamp],
+                                              currentConsistentTimestamp: => Option[Timestamp],
+                                              isDraining: => Boolean = false): ReplicationSourceIterator = {
+    val recorder = recorders(priority)
+    val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
+    val member = recorder.member
+
+    val firstTimestamp = findStartTimestamp(txLog)
+    debug(s"First '$token:$name#$priority' log timestamp is $firstTimestamp")
+
+    val (initialTimestamp, minTimestamp) = startTimestamp match {
+      case Some(start) => {
+        // The startTimestamp may or may not exist in the priority log. The following code ensure that we start
+        // reading from an existing timestamp prior startTimestamp.
+        val initialTimestamp = txLog.guessLogFile(start).map(file => txLog.getIndexFromName(file.getName)) match {
+          case Some(Index(_, Some(consistentTimestamp))) => Ordering[Timestamp].min(consistentTimestamp, firstTimestamp)
+          case _ => firstTimestamp
+        }
+        (initialTimestamp, start)
+      }
+      case None => (firstTimestamp, firstTimestamp)
+    }
+
+    debug(s"Read '$token:$name#$priority' log from $initialTimestamp but filtering items before $minTimestamp")
+
+    // Filter out items prior minTimestamp
+    new TransactionLogReplicationIterator(member, initialTimestamp, txLog, currentConsistentTimestamp, isDraining).withFilter {
+      case Some(msg) => msg.timestamp.get >= minTimestamp
+      case None => true
+    }
+  }
+
   /**
    * Creates a new LogQueueFeeder.QueueReader. This method is passed as a factory function to the
    * LogQueueFeeder constructor.
@@ -196,17 +215,13 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
     val recorder = recorders(priority)
 
     def createLogTaskReader: PriorityTaskItemReader = {
-      val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
-      val initialTimestamp = startTimestamp.getOrElse(findStartTimestamp(txLog))
-
-      debug(s"Creating log queue reader '$token:$name#$priority' starting at $initialTimestamp")
+      debug(s"Creating log queue reader '$token:$name#$priority' starting at $startTimestamp")
 
       // Rebuild in-memory states by reading all the persisted tasks from the transaction log once
-      val (total, processed) = rebuildPriorityQueueState(priority, initialTimestamp)
+      val (total, processed) = rebuildPriorityQueueState(priority, startTimestamp)
       totalTaskCount.addAndGet(total)
 
-      val itr = new TransactionLogReplicationIterator(recorder.member,
-        initialTimestamp, txLog, recorder.currentConsistentTimestamp).withFilter {
+      val itr = createPriorityLogSourceIterator(priority, startTimestamp, recorder.currentConsistentTimestamp).withFilter {
         case Some(msg) => !truncateTracker.contains(msg.timestamp.get)
         case None => true
       }
@@ -221,18 +236,16 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
    * (i.e. excluding acknowledged tasks) and keep a list of processed tasks (i.e. the acknowledged ones).
    * The processed tasks will be skip when read again from the feeder.
    */
-  private def rebuildPriorityQueueState(priority: Int, initialTimestamp: Timestamp): (Int, Set[Timestamp]) = {
+  private def rebuildPriorityQueueState(priority: Int, startTimestamp: Option[Timestamp]): (Int, Set[Timestamp]) = {
 
     import com.wajam.commons.Closable.using
 
-    debug(s"Rebuilding queue state '$token:$name#$priority'")
+    debug(s"Rebuilding queue state '$token:$name#$priority' starting at $startTimestamp")
 
     val recorder = recorders(priority)
-    val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
-    val member = recorder.member
     val endTimestamp = synchronized(rebuildEndPositions(priority))
 
-    using(new TransactionLogReplicationIterator(member, initialTimestamp, txLog, Some(Long.MaxValue), isDraining = true)) { itr =>
+    using(createPriorityLogSourceIterator(priority, startTimestamp, Some(Long.MaxValue), isDraining = true)) { itr =>
       // The log replication source does not return items beyond the consistent timestamp (i.e. `next` return None) and
       // `hasNext` continue to returns true. This behavior is fine for its original purpose i.e. stay open and
       // produce new transactions to replicate once they are appended to the log.
