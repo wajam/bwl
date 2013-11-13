@@ -12,11 +12,11 @@ import com.wajam.bwl.queue._
 import scala.concurrent.Future
 import org.scalatest.mock.MockitoSugar
 import com.wajam.nrv.consistency.ConsistencyOne
-import com.wajam.bwl.FeederTestHelper._
 import org.scalatest.matchers.ShouldMatchers._
 import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
-import com.wajam.spnl.feeder.Feeder
+import com.wajam.bwl.QueueStatsHelper._
+import com.wajam.bwl.FeederTestHelper._
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.commons.Closable.using
 
@@ -65,26 +65,6 @@ class TestLogQueue extends FlatSpec {
       }
     }
 
-    def waitForCondition(timeoutInMs: Long = 2000L, sleepTimeInMs: Long = 50L)(predicate: => Boolean) {
-      val startTime = System.currentTimeMillis()
-      while (!predicate) {
-        val elapseTime = System.currentTimeMillis() - startTime
-        if (elapseTime > timeoutInMs) {
-          throw new RuntimeException(s"Timeout waiting for condition after $elapseTime ms.")
-        }
-        Thread.sleep(sleepTimeInMs)
-      }
-    }
-
-    /**
-     * Wait until specified feeder is ready to produce non empty data or the timeout is reach.
-     */
-    def waitForFeederData(feeder: Feeder, timeoutInMs: Long = 2000L, sleepTimeInMs: Long = 50L) {
-      waitForCondition(timeoutInMs, sleepTimeInMs) {
-        feeder.peek().nonEmpty
-      }
-    }
-
     /**
      * Add a task item in a new queue instance. Can be used to simulate file rolling.
      */
@@ -96,24 +76,6 @@ class TestLogQueue extends FlatSpec {
       waitForFeederData(queue.feeder)
       queue.stop()
       item
-    }
-  }
-
-  /**
-   * QueueStats wrapper which facilitate stats verification during the test
-   */
-  implicit class QueueStatsVerifier(stats: QueueStats) extends QueueStats {
-    def totalTasks = stats.totalTasks
-
-    def pendingTasks = stats.pendingTasks
-
-    def delayedTasks = stats.delayedTasks
-
-    def verifyEqualsTo(totalTasks: Int, pendingTasks: Iterable[QueueItem.Task] = Nil,
-                       delayedTasks: Iterable[QueueItem.Task] = Nil) {
-      stats.totalTasks should be(totalTasks)
-      stats.pendingTasks.toList should be(pendingTasks.toList)
-      stats.delayedTasks.toList should be(delayedTasks.toList)
     }
   }
 
