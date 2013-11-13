@@ -12,7 +12,7 @@ import com.wajam.nrv.utils.timestamp.Timestamp
 @RunWith(classOf[JUnitRunner])
 class TestDelayedTaskIterator extends FlatSpec {
 
-  private def task(taskId: Long, priority: Int = 1, executeAfter: Option[Timestamp] = None) = QueueItem.Task("name", taskId, priority, taskId, taskId, executeAfter)
+  private def task(taskId: Long, priority: Int = 1, executeAfter: Option[Long] = None) = QueueItem.Task("name", taskId, priority, taskId, taskId, executeAfter)
 
   "a DelayedTaskIterator" should "return non-delayed tasks in order" in {
     val tasks = Queue(task(1), task(2), task(3), task(4)).map(Option(_))

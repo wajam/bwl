@@ -55,7 +55,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
     def peek(): Option[FeederData] = {
       taskIterator.peek match {
         case Some(item) => Some(item.toFeederData)
-        case _ => {
+        case None => {
           // Peek returned nothing, must skip it or will always be empty
           taskIterator.next()
           None
@@ -64,7 +64,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
     }
 
     def next(): Option[FeederData] = {
-      taskIterator.next() map { item =>
+      taskIterator.next().map { item =>
         pendingTasks += item.taskId -> item
         item.toFeederData
       }
