@@ -7,25 +7,27 @@ import org.scalatest.junit.JUnitRunner
 import org.scalatest.FlatSpec
 import org.scalatest.matchers.ShouldMatchers._
 import org.scalatest.mock.MockitoSugar
+import com.wajam.commons.ControlableCurrentTime
 import com.wajam.nrv.service.Service
 import com.wajam.bwl.queue.{QueueItem, QueueTask}
 import com.wajam.bwl.FeederTestHelper._
 import com.wajam.bwl.QueueStatsHelper
 import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
+import com.wajam.nrv.utils.timestamp.Timestamp
 
 @RunWith(classOf[JUnitRunner])
 class TestMemoryQueue extends FlatSpec with MockitoSugar {
 
-  private val dummyCallback: QueueTask.Callback = (_) => mock[Future[QueueTask.Result]]
+  private def task(taskId: Long, priority: Int = 1, executeAfter: Option[Timestamp] = None) = QueueItem.Task("name", taskId, priority, taskId, taskId, executeAfter)
 
-  private def task(taskId: Long, priority: Int = 1) = QueueItem.Task("name", token = taskId, priority, taskId, data = taskId)
-
-  trait WithQueue extends MockitoSugar {
+  trait WithDefinition {
     val priorities = List(Priority(1, weight = 66), Priority(2, weight = 33))
     val definition: QueueDefinition = QueueDefinition("name", (_) => mock[Future[QueueTask.Result]], priorities = priorities)
+  }
 
-    val queue = MemoryQueue.create(0, definition, mock[Service])
+  trait WithQueue extends WithDefinition with MockitoSugar {
+    val queue = new MemoryQueue(0, definition) with ControlableCurrentTime
   }
 
   import QueueStatsHelper.QueueStatsVerifier
@@ -89,9 +91,9 @@ class TestMemoryQueue extends FlatSpec with MockitoSugar {
     queue.stats.verifyEqualsTo(totalTasks = 0, pendingTasks = Nil)
   }
 
-  it should "produce expected task priority distribution" in new WithQueue {
+  it should "produce expected task priority distribution" in new WithDefinition {
     val random = new Random(seed = 999)
-    override val queue = MemoryQueue.create(0, definition, mock[Service])(random)
+    val queue = MemoryQueue.create(0, definition, mock[Service])(random)
 
     for(priority <- 1 to 2; i <- 1 to 100) {
       queue.enqueue(task(priority, priority))
@@ -102,5 +104,36 @@ class TestMemoryQueue extends FlatSpec with MockitoSugar {
 
     items.count(_("data") == 1) should be(62)
     items.count(_("data") == 2) should be(36)
+  }
+
+  it should "respect delayed tasks order" in new WithQueue {
+    val delay = 10000
+
+    // Enqueue a task with a 10s delay
+    val t1 = queue.enqueue(task(taskId = 1L, priority = 1, Some(queue.currentTime + delay)))
+
+    // Enqueue regular tasks
+    val t2 = queue.enqueue(task(taskId = 2L, priority = 1))
+    val t3 = queue.enqueue(task(taskId = 3L, priority = 1))
+
+    // Enqueue a task with a 5s delay
+    val t4 = queue.enqueue(task(taskId = 4L, priority = 1, Some(queue.currentTime + delay / 2)))
+
+    waitForFeederData(queue.feeder, 10000L)
+
+    queue.feeder.peek() should be(Some(t2.toFeederData))
+    queue.feeder.next() should be(Some(t2.toFeederData))
+
+    queue.advanceTime(delay)
+
+    // t3 has been fetched before time was advanced
+    queue.feeder.peek() should be(Some(t3.toFeederData))
+    queue.feeder.next() should be(Some(t3.toFeederData))
+
+    queue.feeder.peek() should be(Some(t1.toFeederData))
+    queue.feeder.next() should be(Some(t1.toFeederData))
+
+    queue.feeder.peek() should be(Some(t4.toFeederData))
+    queue.feeder.next() should be(Some(t4.toFeederData))
   }
 }

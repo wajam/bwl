@@ -21,7 +21,7 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
 
   private val dummyCallback: QueueTask.Callback = (_) => mock[Future[QueueTask.Result]]
 
-  private def task(id: Long, priority: Int = 1): QueueItem.Task = QueueItem.Task("name", token = id, priority, id, data = id)
+  private def task(id: Long, priority: Int = 1): QueueItem.Task = QueueItem.Task("name", id, priority, id, data = id)
 
   private def someTask(id: Long, priority: Int = 1): Option[QueueItem.Task] = Some(task(id, priority))
 

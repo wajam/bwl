@@ -1,30 +1,38 @@
 package com.wajam.bwl.queue.memory
 
-import com.wajam.bwl.queue._
+import scala.util.Random
+import scala.collection.immutable.TreeMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
-import com.wajam.spnl.feeder.Feeder
-import com.wajam.spnl.TaskContext
-import com.wajam.bwl.utils.PeekIterator
+import com.wajam.commons.CurrentTime
 import com.wajam.nrv.service.Service
 import com.wajam.nrv.utils.timestamp.Timestamp
-import com.wajam.bwl.QueueResource._
-import scala.collection.immutable.TreeMap
+import com.wajam.spnl.feeder.Feeder
 import com.wajam.spnl.feeder.Feeder._
+import com.wajam.spnl.TaskContext
+import com.wajam.bwl.utils.PeekIterator
+import com.wajam.bwl.queue._
+import com.wajam.bwl.QueueResource._
+import com.wajam.bwl.utils.DelayedTaskIterator
 import com.wajam.bwl.queue.QueueDefinition
-import scala.util.Random
 
 /**
  * Simple memory queue. MUST not be used in production.
  */
-class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit random: Random = Random) extends Queue {
+class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit random: Random = Random) extends Queue with CurrentTime {
   self =>
 
   private val selector = new PrioritySelector(priorities)
   private val queues = priorities.map(_.value -> new ConcurrentLinkedQueue[QueueItem.Task]).toMap
   private var pendingTasks: Map[Timestamp, QueueItem.Task] = TreeMap()
 
-  private val randomTaskIterator = PeekIterator(Iterator.continually(queues(selector.next).poll()))
+  private val delayedTaskIterator = new DelayedTaskIterator(
+    Iterator.continually(
+      queues(selector.next).poll()
+    ).map(Option(_))
+  , this)
+
+  private val taskIterator = PeekIterator(delayedTaskIterator)
 
   private val totalTaskCount = new AtomicInteger()
 
@@ -45,23 +53,20 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
     }
 
     def peek(): Option[FeederData] = {
-      randomTaskIterator.peek match {
-        case null => {
-          // Peek returned nothing, must skip it or will always be null
-          randomTaskIterator.next()
+      taskIterator.peek match {
+        case Some(item) => Some(item.toFeederData)
+        case _ => {
+          // Peek returned nothing, must skip it or will always be empty
+          taskIterator.next()
           None
         }
-        case item => Some(item.toFeederData)
       }
     }
 
     def next(): Option[FeederData] = {
-      randomTaskIterator.next() match {
-        case null => None
-        case item => {
-          pendingTasks += item.taskId -> item
-          Some(item.toFeederData)
-        }
+      taskIterator.next() map { item =>
+        pendingTasks += item.taskId -> item
+        item.toFeederData
       }
     }
 
@@ -85,10 +90,9 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
   private object MemoryQueueStats extends QueueStats {
     def totalTasks = totalTaskCount.get()
 
-    def pendingTasks = self.pendingTasks.valuesIterator.toIterable
+    def pendingTasks = self.pendingTasks.values
 
-    // TODO: support delayed tasks
-    def delayedTasks = Nil
+    def delayedTasks = delayedTaskIterator.delayedTasks.values
   }
 }
 
