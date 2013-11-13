@@ -193,7 +193,7 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
         // The startTimestamp may or may not exist in the priority log. The following code ensure that we start
         // reading from an existing timestamp prior startTimestamp.
         val initialTimestamp = txLog.guessLogFile(start).map(file => txLog.getIndexFromName(file.getName)) match {
-          case Some(Index(_, Some(consistentTimestamp))) => Ordering[Timestamp].min(consistentTimestamp, firstTimestamp)
+          case Some(Index(_, Some(consistentTimestamp))) => Ordering[Timestamp].max(consistentTimestamp, firstTimestamp)
           case _ => firstTimestamp
         }
         (initialTimestamp, start)
