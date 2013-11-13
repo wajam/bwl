@@ -31,4 +31,7 @@ Thumbs.db
 .*.swp
 .swp
 
-queues/*
+# Demo generated files #
+######################
+data/*
+logs/*

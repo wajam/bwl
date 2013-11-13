@@ -2,27 +2,32 @@ package com.wajam.bwl.demo
 
 import com.wajam.commons.Logging
 import scala.concurrent.ExecutionContext
-import com.wajam.nrv.cluster.{ StaticClusterManager, ClusterManager, Cluster, LocalNode }
+import com.wajam.nrv.cluster._
 import com.wajam.nrv.protocol._
 import com.wajam.nrv.extension.resource._
 import com.wajam.nrv.protocol.codec.StringCodec
-import com.wajam.spnl.Spnl
-import com.wajam.bwl.Bwl
+import com.wajam.spnl._
+import com.wajam.bwl.{ ConsistentBwl, Bwl }
 import com.wajam.bwl.queue.QueueDefinition
 import com.wajam.bwl.queue.log.LogQueue
 import java.io.File
-import com.wajam.nrv.service.{ ActionSupportOptions, Service }
+import com.wajam.nrv.service.{ Switchboard, ExplicitReplicaResolver, ActionSupportOptions, Service }
 import com.wajam.nrv.zookeeper.cluster.ZookeeperClusterManager
 import com.wajam.nrv.zookeeper.ZookeeperClient
 import org.apache.log4j.PropertyConfigurator
 import com.typesafe.config.ConfigFactory
+import com.wajam.nrv.consistency.{ ConsistencyPersistence, ConsistencyMasterSlave }
+import com.wajam.scn.client.{ ScnClientConfig, ScnClient }
+import com.wajam.scn.{ Scn, ScnConfig }
+import com.wajam.scn.storage.StorageType
+import java.nio.file.Files
 
 object Demo extends App with Logging {
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
   PropertyConfigurator.configureAndWatch("etc/log4j.properties", 5000)
-  log.info("Bwl movement")
+  log.info("Initializing Bwl movement")
 
   val config: DemoConfig = new DemoConfig(ConfigFactory.load())
   val server = new DemoServer(config)
@@ -36,19 +41,18 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
 
   log.info("Local node is {}", node)
 
+  lazy val zkClient = new ZookeeperClient(config.getZookeeperServers)
+
   val httpProtocol = createHttpProtocol()
   val nrvProtocol = createNrvProtocol()
 
-  val spnl = new Spnl()
+  val (scnService, scnClient) = createScnServiceAndClient()
 
-  val definitions = List(QueueDefinition("single", new DemoResource.Callback("single")))
+  val queueDefinitions = List(QueueDefinition("single", new DemoResource.Callback("single")))
 
-  val bwlService = new Bwl("bwl",
-    definitions,
-    LogQueue.create(new File(config.getBwlLogQueueDirectory)),
-    spnl)
+  val bwlService = createBwlService(queueDefinitions)
 
-  val demoService = createService("demo")
+  val demoService = createDemoService()
 
   val cluster = new Cluster(node, createClusterManager(), new ActionSupportOptions(), Some(nrvProtocol))
 
@@ -58,9 +62,13 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
 
   cluster.registerService(demoService)
   cluster.registerService(bwlService)
+  cluster.registerService(scnService)
+
+  bwlService.consistency.bindService(bwlService)
 
   def start(): Unit = {
     cluster.start()
+    scnClient.start()
   }
 
   def startAndBlock(): Unit = {
@@ -76,12 +84,12 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
     config.getClusterManager match {
       case "static" => {
         val clusterManager = new StaticClusterManager
-        clusterManager.addMembers(demoService, config.getDemoClusterMembers)
+        clusterManager.addMembers(scnService, config.getScnClusterMembers)
         clusterManager.addMembers(bwlService, config.getBwlClusterMembers)
         clusterManager
       }
       case "zookeeper" => {
-        new ZookeeperClusterManager(new ZookeeperClient(config.getZookeeperServers))
+        new ZookeeperClusterManager(zkClient)
       }
     }
   }
@@ -108,11 +116,57 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
     httpProtocol
   }
 
-  private def createService(name: String): Service = {
-    val service = new Service(name)
-    val demoResource = new DemoResource(bwlService, definitions)
-    service.registerResources(demoResource)
+  private def createScnServiceAndClient(): (Scn, ScnClient) = {
+    val scnConfig = ScnConfig()
+    val service = config.getClusterManager match {
+      case "zookeeper" => new Scn("scn", scnConfig, StorageType.ZOOKEEPER, Some(zkClient))
+      case _ => new Scn("scn", scnConfig, StorageType.MEMORY)
+    }
+    service.applySupport(switchboard = Some(new Switchboard("scn")))
+    (service, new ScnClient(service, ScnClientConfig()))
+  }
+
+  private def createBwlService(definitions: Iterable[QueueDefinition]): Bwl = {
+
+    val spnlPersistenceFactory = config.getClusterManager match {
+      case "zookeeper" => new ZookeeperTaskPersistenceFactory(zkClient)
+      case _ => new NoTaskPersistenceFactory
+    }
+
+    val queueFactory = LogQueue.create(new File(config.getBwlPersistentQueueDirectory),
+      config.getBwlPersistentQueueRolloverSize,
+      config.getBwlPersistentQueueCommitFrequency,
+      config.getBwlPersistentQueueCleanFrequency) _
+
+    val service = new Bwl("bwl", definitions, queueFactory, new Spnl(), spnlPersistenceFactory) with ConsistentBwl
+
+    if (config.getBwlConsistencyReplicationEnabled) {
+      val consistencyLogDirectory = new File(config.getBwlConsistencyLogDirectory)
+      Files.createDirectories(consistencyLogDirectory.toPath)
+
+      val consistency = new ConsistencyMasterSlave(
+        scnClient,
+        new ConsistencyPersistence {
+          def start() = {}
+          def stop() = {}
+          def explicitReplicasMapping = config.getBwlConsistencyExplicitReplicas
+          def replicationLagSeconds(token: Long, node: Node) = None
+          def replicationLagSeconds_=(token: Long, node: Node, lag: Option[Int]) = {}
+          def changeMasterServiceMember(token: Long, node: Node) = {}
+        },
+        config.getBwlConsistencyLogDirectory,
+        txLogEnabled = true,
+        replicationResolver = Some(new ExplicitReplicaResolver(config.getBwlConsistencyExplicitReplicas, service.resolver)))
+      service.applySupport(consistency = Some(consistency), responseTimeout = Some(config.getBwlTaskTimeout))
+    }
+
     service
   }
 
+  private def createDemoService(): Service = {
+    val service = new Service("demo")
+    val demoResource = new DemoResource(bwlService, queueDefinitions)
+    service.registerResources(demoResource)
+    service
+  }
 }

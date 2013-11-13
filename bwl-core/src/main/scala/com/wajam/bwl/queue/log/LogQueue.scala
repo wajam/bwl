@@ -8,7 +8,7 @@ import java.io.File
 import java.nio.file.{ Files, Paths }
 import com.wajam.nrv.consistency._
 import com.wajam.nrv.service.{ TokenRange, Service }
-import com.wajam.nrv.consistency.log.{ LogRecord, TimestampedRecord, FileTransactionLog }
+import com.wajam.nrv.consistency.log.{ TransactionLog, LogRecord, TimestampedRecord, FileTransactionLog }
 import com.wajam.nrv.consistency.replication.{ ReplicationSourceIterator, TransactionLogReplicationIterator }
 import com.wajam.bwl.QueueResource._
 import com.wajam.bwl.queue.Priority
@@ -49,6 +49,9 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
     }
   }
 
+  private val lastItemId = new AtomicTimestamp(AtomicTimestamp.updateIfGreater,
+    recorders.valuesIterator.flatMap(_.currentConsistentTimestamp).reduceOption(Ordering[Timestamp].max))
+
   private var openReadIterators: List[PeekIterator[QueueItem]] = Nil
 
   private val totalTaskCount = new AtomicInteger()
@@ -74,6 +77,7 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
         val request = item2request(taskItem)
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
+        lastItemId.update(Some(taskItem.itemId))
 
         // Only update the task count if the enqueue task is after the max rebuild position.
         if (taskItem.taskId > getOrInitializeRebuildEndPosition) {
@@ -94,6 +98,8 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
         val request = item2request(ackItem)
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
+        lastItemId.update(Some(ackItem.itemId))
+
         if (feeder.isPending(ackItem.taskId)) {
           totalTaskCount.decrementAndGet()
         }
@@ -110,15 +116,14 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
   def stats: QueueStats = LogQueueStats
 
   def getLastQueueItemId = {
-    val lastIdOpt = recorders.valuesIterator.flatMap(_.currentConsistentTimestamp).reduceOption(Ordering[Timestamp].max)
-    lastIdOpt match {
-      case Some(last) if truncateTracker.contains(last) => {
-        debug(s"Queue '$token:$name' last item '$last' is truncated. Fallback to a slower method to find non-truncated id.")
-        val timestamps: Iterator[Timestamp] = recorders.valuesIterator.flatMap(recorder =>
+    lastItemId.get match {
+      case Some(lastId) if truncateTracker.contains(lastId) => {
+        debug(s"Queue '$token:$name' last item '$lastId' is truncated. Fallback to a slower method to find non-truncated id.")
+        val ids: Iterator[Timestamp] = recorders.valuesIterator.flatMap(recorder =>
           getLastNonTruncatedQueueItemId(recorder.txLog.asInstanceOf[FileTransactionLog]))
-        timestamps.reduceOption(Ordering[Timestamp].max)
+        ids.reduceOption(Ordering[Timestamp].max)
       }
-      case _ => lastIdOpt
+      case lastIdOpt => lastIdOpt
     }
   }
 
@@ -140,22 +145,9 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
             def close() = {}
           }
         } else {
-          // The startItemId is may or may not exist in the priority log. The following code ensure that we start
-          // reading from an existing id prior startItemId.
-          val initialTimestamp = txLog.guessLogFile(startItemId).map(file => txLog.getIndexFromName(file.getName)) match {
-            case Some(Index(_, Some(consistentTimestamp))) => {
-              consistentTimestamp
-            }
-            case _ => {
-              findStartTimestamp(txLog)
-            }
-          }
-          debug(s"Reading queue '$token:$name#$priority' log from $initialTimestamp but filtering items before $startItemId")
-
-          // Filter out items prior startItemId and truncated items
-          new TransactionLogReplicationIterator(recorder.member,
-            initialTimestamp, txLog, recorder.currentConsistentTimestamp).withFilter {
-            case Some(msg) => msg.timestamp.get >= startItemId && !truncateTracker.contains(msg.timestamp.get)
+          // Filter out truncated items
+          createPriorityLogSourceIterator(priority, Some(startItemId), recorder.currentConsistentTimestamp).withFilter {
+            case Some(msg) => !truncateTracker.contains(msg.timestamp.get)
             case None => true
           }
         }
@@ -186,6 +178,38 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
     truncateTracker.truncate(itemId)
   }
 
+  private def createPriorityLogSourceIterator(priority: Int, startTimestamp: Option[Timestamp],
+                                              currentConsistentTimestamp: => Option[Timestamp],
+                                              isDraining: => Boolean = false): ReplicationSourceIterator = {
+    val recorder = recorders(priority)
+    val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
+    val member = recorder.member
+
+    val firstTimestamp = findStartTimestamp(txLog)
+    debug(s"First '$token:$name#$priority' log timestamp is $firstTimestamp")
+
+    val (initialTimestamp, minTimestamp) = startTimestamp match {
+      case Some(start) => {
+        // The startTimestamp may or may not exist in the priority log. The following code ensure that we start
+        // reading from an existing timestamp prior startTimestamp.
+        val initialTimestamp = txLog.guessLogFile(start).map(file => txLog.getIndexFromName(file.getName)) match {
+          case Some(Index(_, Some(consistentTimestamp))) => Ordering[Timestamp].max(consistentTimestamp, firstTimestamp)
+          case _ => firstTimestamp
+        }
+        (initialTimestamp, start)
+      }
+      case None => (firstTimestamp, firstTimestamp)
+    }
+
+    debug(s"Read '$token:$name#$priority' log from $initialTimestamp but filtering items before $minTimestamp")
+
+    // Filter out items prior minTimestamp
+    new TransactionLogReplicationIterator(member, initialTimestamp, txLog, currentConsistentTimestamp, isDraining).withFilter {
+      case Some(msg) => msg.timestamp.get >= minTimestamp
+      case None => true
+    }
+  }
+
   /**
    * Creates a new LogQueueFeeder.QueueReader. This method is passed as a factory function to the
    * LogQueueFeeder constructor.
@@ -196,17 +220,13 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
     val recorder = recorders(priority)
 
     def createLogTaskReader: PriorityTaskItemReader = {
-      val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
-      val initialTimestamp = startTimestamp.getOrElse(findStartTimestamp(txLog))
-
-      debug(s"Creating log queue reader '$token:$name#$priority' starting at $initialTimestamp")
+      debug(s"Creating log queue reader '$token:$name#$priority' starting at $startTimestamp")
 
       // Rebuild in-memory states by reading all the persisted tasks from the transaction log once
-      val (total, processed) = rebuildPriorityQueueState(priority, initialTimestamp)
+      val (total, processed) = rebuildPriorityQueueState(priority, startTimestamp)
       totalTaskCount.addAndGet(total)
 
-      val itr = new TransactionLogReplicationIterator(recorder.member,
-        initialTimestamp, txLog, recorder.currentConsistentTimestamp).withFilter {
+      val itr = createPriorityLogSourceIterator(priority, startTimestamp, recorder.currentConsistentTimestamp).withFilter {
         case Some(msg) => !truncateTracker.contains(msg.timestamp.get)
         case None => true
       }
@@ -221,18 +241,16 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
    * (i.e. excluding acknowledged tasks) and keep a list of processed tasks (i.e. the acknowledged ones).
    * The processed tasks will be skip when read again from the feeder.
    */
-  private def rebuildPriorityQueueState(priority: Int, initialTimestamp: Timestamp): (Int, Set[Timestamp]) = {
+  private def rebuildPriorityQueueState(priority: Int, startTimestamp: Option[Timestamp]): (Int, Set[Timestamp]) = {
 
     import com.wajam.commons.Closable.using
 
-    debug(s"Rebuilding queue state '$token:$name#$priority'")
+    debug(s"Rebuilding queue state '$token:$name#$priority' starting at $startTimestamp")
 
     val recorder = recorders(priority)
-    val txLog = recorder.txLog.asInstanceOf[FileTransactionLog]
-    val member = recorder.member
     val endTimestamp = synchronized(rebuildEndPositions(priority))
 
-    using(new TransactionLogReplicationIterator(member, initialTimestamp, txLog, Some(Long.MaxValue), isDraining = true)) { itr =>
+    using(createPriorityLogSourceIterator(priority, startTimestamp, Some(Long.MaxValue), isDraining = true)) { itr =>
       // The log replication source does not return items beyond the consistent timestamp (i.e. `next` return None) and
       // `hasNext` continue to returns true. This behavior is fine for its original purpose i.e. stay open and
       // produce new transactions to replicate once they are appended to the log.

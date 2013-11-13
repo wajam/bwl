@@ -4,6 +4,9 @@ import com.wajam.commons.Closable
 
 /**
  * Iterator decorator which allows peeking at the next element. This implementation read ahead the next element.
+ * <br/>
+ * One should discard the decorated iterator, and use only the new PeekIterator. Using the old iterator is undefined,
+ * subject to change, and may result in changes to the new iterator as well.
  */
 class PeekIterator[T](itr: Iterator[T]) extends Iterator[T] {
 
