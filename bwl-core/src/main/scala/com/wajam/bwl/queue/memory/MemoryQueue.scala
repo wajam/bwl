@@ -67,7 +67,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
 
     def ack(data: FeederData) {
       val taskId = data(TaskId).toString.toLong
-      if(isPending(taskId)) totalTaskCount.decrementAndGet()
+      if (isPending(taskId)) totalTaskCount.decrementAndGet()
       pendingTasks -= taskId
     }
 

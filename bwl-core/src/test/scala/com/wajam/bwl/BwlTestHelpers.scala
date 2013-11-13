@@ -4,7 +4,7 @@ import com.wajam.spnl.feeder.Feeder
 import com.wajam.commons.Closable
 import com.wajam.spnl.feeder.Feeder.FeederData
 import language.implicitConversions
-import com.wajam.bwl.queue.{QueueItem, QueueStats}
+import com.wajam.bwl.queue.{ QueueItem, QueueStats }
 import org.scalatest.matchers.ShouldMatchers._
 
 // TODO: Add in SPNL. This is a copy of a class also present in MRY
