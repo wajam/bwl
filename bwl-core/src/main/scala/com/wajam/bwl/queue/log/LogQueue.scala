@@ -49,6 +49,9 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
     }
   }
 
+  private val lastItemId = new AtomicTimestamp(AtomicTimestamp.updateIfGreater,
+    recorders.valuesIterator.flatMap(_.currentConsistentTimestamp).reduceOption(Ordering[Timestamp].max))
+
   private var openReadIterators: List[PeekIterator[QueueItem]] = Nil
 
   private val totalTaskCount = new AtomicInteger()
@@ -74,6 +77,7 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
         val request = item2request(taskItem)
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
+        lastItemId.update(Some(taskItem.itemId))
 
         // Only update the task count if the enqueue task is after the max rebuild position.
         if (taskItem.taskId > getOrInitializeRebuildEndPosition) {
@@ -94,6 +98,8 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
         val request = item2request(ackItem)
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
+        lastItemId.update(Some(ackItem.itemId))
+
         if (feeder.isPending(ackItem.taskId)) {
           totalTaskCount.decrementAndGet()
         }
@@ -110,15 +116,14 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
   def stats: QueueStats = LogQueueStats
 
   def getLastQueueItemId = {
-    val lastIdOpt = recorders.valuesIterator.flatMap(_.currentConsistentTimestamp).reduceOption(Ordering[Timestamp].max)
-    lastIdOpt match {
-      case Some(last) if truncateTracker.contains(last) => {
-        debug(s"Queue '$token:$name' last item '$last' is truncated. Fallback to a slower method to find non-truncated id.")
-        val timestamps: Iterator[Timestamp] = recorders.valuesIterator.flatMap(recorder =>
+    lastItemId.get match {
+      case Some(lastId) if truncateTracker.contains(lastId) => {
+        debug(s"Queue '$token:$name' last item '$lastId' is truncated. Fallback to a slower method to find non-truncated id.")
+        val ids: Iterator[Timestamp] = recorders.valuesIterator.flatMap(recorder =>
           getLastNonTruncatedQueueItemId(recorder.txLog.asInstanceOf[FileTransactionLog]))
-        timestamps.reduceOption(Ordering[Timestamp].max)
+        ids.reduceOption(Ordering[Timestamp].max)
       }
-      case _ => lastIdOpt
+      case lastIdOpt => lastIdOpt
     }
   }
 

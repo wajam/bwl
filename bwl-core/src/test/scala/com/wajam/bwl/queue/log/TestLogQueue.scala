@@ -190,7 +190,6 @@ class TestLogQueue extends FlatSpec {
       queue1.enqueue(task(taskId = 4L, priority = 2))
       queue1.enqueue(task(taskId = 5L, priority = 1))
       queue1.enqueue(task(taskId = 2L, priority = 1))
-      waitForFeederData(queue1.feeder)
       queue1.getLastQueueItemId should be(Some(Timestamp(5L)))
       queue1.stop()
 
@@ -367,14 +366,17 @@ class TestLogQueue extends FlatSpec {
 
       val queue1 = createQueue()
       queue1.writeQueueItem(t1)
+      queue1.getLastQueueItemId should be(Some(t1.itemId))
       queue1.writeQueueItem(t2)
       queue1.writeQueueItem(t3)
       queue1.writeQueueItem(t4)
       queue1.writeQueueItem(a5_t1)
+      queue1.getLastQueueItemId should be(Some(a5_t1.itemId))
       queue1.writeQueueItem(a6_t4)
       queue1.writeQueueItem(a7_t3)
       queue1.writeQueueItem(a8_t2)
       queue1.writeQueueItem(t9)
+      queue1.getLastQueueItemId should be(Some(t9.itemId))
       waitForFeederData(queue1.feeder)
 
       val readItems = using(queue1.readQueueItems(startItemId = t3.taskId, endItemId = a7_t3.ackId)) { reader =>
