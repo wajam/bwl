@@ -24,7 +24,8 @@ class DelayedTaskIterator(itr: Iterator[Option[QueueItem.Task]], time: CurrentTi
         // The most urgent delayed task is ready: return it
         _delayedTasks -= timestamp
         Some(task)
-      case _ if(hasNext) =>
+      case _ if itr.hasNext =>
+        // No delayed task ready to be returned: get next from wrapped iterator
         itr.next().flatMap { task =>
           task.executeAfter match {
             case None =>
@@ -39,7 +40,11 @@ class DelayedTaskIterator(itr: Iterator[Option[QueueItem.Task]], time: CurrentTi
               next()
           }
         }
+      case _ if _delayedTasks.nonEmpty =>
+        // Wrapped iterator is empty but we have delayed tasks: return None
+        None
       case _ =>
+        // Wrapped iterator is empty and we don't have delayed tasks: error
         throw new NoSuchElementException
     }
   }
