@@ -7,7 +7,6 @@ import org.scalatest.FlatSpec
 import org.scalatest.matchers.ShouldMatchers._
 import com.wajam.commons.ControlableCurrentTime
 import com.wajam.bwl.queue.QueueItem
-import com.wajam.nrv.utils.timestamp.Timestamp
 
 @RunWith(classOf[JUnitRunner])
 class TestDelayedTaskIterator extends FlatSpec {
@@ -24,6 +23,14 @@ class TestDelayedTaskIterator extends FlatSpec {
     itr.next() should be(tasks(3))
   }
 
+  it should "return None when wrapped iterator returns None" in {
+    val tasks = Queue(None)
+    val itr = new DelayedTaskIterator(tasks.toIterator, new ControlableCurrentTime {})
+
+    itr.hasNext should be(true)
+    itr.next() should be(None)
+  }
+
   it should "return a delayed task once the delay is elapsed" in {
     val timer = new ControlableCurrentTime {}
     val delay = 10000L
@@ -38,7 +45,7 @@ class TestDelayedTaskIterator extends FlatSpec {
     itr.next() should be(tasks(0))
   }
 
-  it should "respect expected delayed/non-delayed tasks order" in {
+  it should "respect expected order of delayed/non-delayed tasks" in {
     val timer = new ControlableCurrentTime {}
     val delay = 5000L
 
@@ -63,4 +70,27 @@ class TestDelayedTaskIterator extends FlatSpec {
     itr.next() should be(tasks(0))
   }
 
+  it should "respect expected order of consecutive delayed tasks" in {
+    val timer = new ControlableCurrentTime {}
+    val delay = 5000L
+
+    val tasks = Queue(
+      task(1, 1, Some(timer.currentTime + delay)),
+      task(2, 1, Some(timer.currentTime + delay + 1)),
+      task(3, 1, Some(timer.currentTime + delay + 2)),
+      task(4, 1, Some(timer.currentTime + delay + 3)),
+      null
+    ).map(Option(_))
+    val itr = new DelayedTaskIterator(tasks.toIterator, timer)
+
+    itr.hasNext should be(true)
+    itr.next() should be(None)
+
+    timer.advanceTime(delay + 3)
+
+    itr.next() should be(tasks(0))
+    itr.next() should be(tasks(1))
+    itr.next() should be(tasks(2))
+    itr.next() should be(tasks(3))
+  }
 }
