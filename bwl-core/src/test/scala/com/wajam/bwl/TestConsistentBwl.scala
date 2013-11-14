@@ -84,8 +84,8 @@ class TestConsistentBwl extends FlatSpec {
 
       val remoteToken = f.remoteMember.token
 
-      val t1 = QueueItem.Task(f.definitions(0).name, token = remoteToken, 1, 1L, "hello")
-      val t2 = QueueItem.Task(f.definitions(1).name, token = remoteToken, 2, 2L, "goodbye")
+      val t1 = QueueItem.Task(f.definitions(0).name, remoteToken, 1, 1L, "hello")
+      val t2 = QueueItem.Task(f.definitions(1).name, remoteToken, 2, 2L, "goodbye")
       val m1 = f.consistentBwl.task2message(t1)
       val m2 = f.consistentBwl.task2message(t2)
       val m3 = f.consistentBwl.ack2message(t2.toAck(3L))

@@ -14,7 +14,7 @@ import com.wajam.nrv.consistency.replication.ReplicationSourceIterator
 @RunWith(classOf[JUnitRunner])
 class TestTaskItemReader extends FlatSpec {
 
-  private def task(id: Int): QueueItem = QueueItem.Task("name", token = id, priority = id, id, data = id)
+  private def task(id: Int): QueueItem = QueueItem.Task("name", id, id, id, data = id)
 
   private def someTaskMessage(taskId: Int): Option[InMessage] = Some(LogQueue.item2request(task(taskId)))
 
