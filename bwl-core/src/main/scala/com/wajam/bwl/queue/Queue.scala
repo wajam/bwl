@@ -27,7 +27,7 @@ sealed trait QueueItem {
 
 object QueueItem {
 
-  case class Task(name: String, token: Long, priority: Int, taskId: Timestamp, data: Any, executeAfter: Option[Long] = None) extends QueueItem {
+  case class Task(name: String, token: Long, priority: Int, taskId: Timestamp, data: Any, scheduleTime: Option[Long] = None) extends QueueItem {
     def itemId = taskId
 
     def toFeederData: FeederData = {
