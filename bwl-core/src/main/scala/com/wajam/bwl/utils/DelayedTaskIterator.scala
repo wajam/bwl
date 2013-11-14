@@ -10,19 +10,20 @@ import com.wajam.bwl.queue.QueueItem
  * The wrapped iterator should not return null values, and it should not be used outside.
  */
 class DelayedTaskIterator(itr: Iterator[Option[QueueItem.Task]], time: CurrentTime) extends Iterator[Option[QueueItem.Task]] {
-  private var _delayedTasks: Map[Long, QueueItem.Task] = TreeMap()
+  // Tasks are indexed with a tuple of (executeAfter, taskId) to ensure both uniqueness and ordering
+  private var _delayedTasks: Map[(Long, Timestamp), QueueItem.Task] = TreeMap()
 
   def delayedTasks = _delayedTasks
 
-  private def isPast(timestamp: Timestamp): Boolean = time.currentTime >= timestamp
+  private def isPast(dateTime: Long): Boolean = time.currentTime >= dateTime
 
   def hasNext = itr.hasNext || _delayedTasks.nonEmpty
 
   def next(): Option[QueueItem.Task] = {
     _delayedTasks.headOption match {
-      case Some((timestamp, task)) if isPast(timestamp) =>
+      case Some(((executeAfter, taskId), task)) if isPast(executeAfter) =>
         // The most urgent delayed task is ready: return it
-        _delayedTasks -= timestamp
+        _delayedTasks -= ((executeAfter, taskId))
         Some(task)
       case _ if itr.hasNext =>
         // No delayed task ready to be returned: get next from wrapped iterator
@@ -31,12 +32,12 @@ class DelayedTaskIterator(itr: Iterator[Option[QueueItem.Task]], time: CurrentTi
             case None =>
               // Task is not delayed: return it
               Some(task)
-            case Some(timestamp) if isPast(timestamp) =>
+            case Some(executeAfter) if isPast(executeAfter) =>
               // Task is delayed but ready to be executed: return it
               Some(task)
-            case Some(timestamp) =>
+            case Some(executeAfter) =>
               // Task is delayed: save it and go to next
-              _delayedTasks += timestamp -> task
+              _delayedTasks += (executeAfter, task.taskId) -> task
               next()
           }
         }
