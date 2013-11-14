@@ -19,9 +19,7 @@ class TestDelayedTaskIterator extends FlatSpec {
     val tasks = List(task(1), task(2), task(3), task(4)).map(Option(_))
     val itr = delayedTaskIterator(tasks)
 
-    itr.take(4).toList should be(tasks)
-
-    itr.hasNext should be(false)
+    itr.take(20).toList should be(tasks)
   }
 
   it should "return None when wrapped iterator returns None" in {
@@ -122,8 +120,6 @@ class TestDelayedTaskIterator extends FlatSpec {
 
     timer.advanceTime(delay + 3)
 
-    itr.take(4).toList should be(tasks)
-
-    itr.hasNext should be(false)
+    itr.take(20).toList should be(tasks)
   }
 }
