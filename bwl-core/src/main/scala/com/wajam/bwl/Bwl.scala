@@ -80,7 +80,7 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
 
     // TODO: allow per queue timeout???
     val taskAction = new TaskAction(s"${serviceName}_${definition.name}", queueCallbackAdapter(definition), responseTimeout)
-    val task = new Task(queue.feeder, taskAction, persistence, queue.definition.taskContext)
+    val task = new Task(queue.feeder, taskAction, persistence, queue.definition.taskContext, random)
 
     QueueWrapper(queue, task)
   }

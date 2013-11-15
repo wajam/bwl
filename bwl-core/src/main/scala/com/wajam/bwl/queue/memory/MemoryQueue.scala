@@ -27,10 +27,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
   private var pendingTasks: Map[Timestamp, QueueItem.Task] = TreeMap()
 
   private val delayedTaskIterator = new DelayedTaskIterator(
-    Iterator.continually(
-      queues(selector.next).poll()
-    ).map(Option(_))
-  , this)
+    Iterator.continually(queues(selector.next).poll()).map(Option(_)), this)
 
   private val taskIterator = PeekIterator(delayedTaskIterator)
 
