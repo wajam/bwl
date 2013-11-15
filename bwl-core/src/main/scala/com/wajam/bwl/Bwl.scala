@@ -1,14 +1,13 @@
 package com.wajam.bwl
 
 import com.wajam.nrv.service.{ ServiceMember, Resolver, Service }
-import com.wajam.nrv.data.MValue
+import com.wajam.nrv.data.{MLong, MValue, MInt}
 import com.wajam.nrv.data.MValue._
 import com.wajam.bwl.queue._
 import scala.concurrent.{ ExecutionContext, Future }
 import com.wajam.bwl.queue.Queue.QueueFactory
 import com.wajam.spnl._
 import com.wajam.bwl.queue.QueueDefinition
-import com.wajam.nrv.data.MInt
 import com.wajam.commons.Logging
 
 class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefinition], protected val createQueue: QueueFactory,
@@ -49,13 +48,13 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
   /**
    * Enqueue the specified task data and returns the task id if enqueued successfully .
    */
-  def enqueue(token: Long, name: String, taskData: Any, priority: Option[Int] = None)(implicit ec: ExecutionContext): Future[Long] = {
+  def enqueue(token: Long, name: String, taskData: Any, priority: Option[Int] = None, scheduleTime: Option[Long] = None)(implicit ec: ExecutionContext): Future[Long] = {
     import com.wajam.nrv.extension.resource.ParamsAccessor._
     import QueueResource._
 
     val action = queueResource.create(this).get
 
-    val params = List[(String, MValue)](TaskToken -> token, QueueName -> name) ++ priority.map(p => TaskPriority -> MInt(p))
+    val params = List[(String, MValue)](TaskToken -> token, QueueName -> name) ++ priority.map(p => TaskPriority -> MInt(p)) ++ scheduleTime.map(t => ScheduleTime -> MLong(t))
     val result = action.call(params = params, meta = Map(), data = taskData)
     result.map(response => response.param[Long](TaskId))
   }

@@ -491,6 +491,7 @@ object LogQueue {
       case MessageType.FUNCTION_CALL if message.path == "/enqueue" => {
         message.timestamp.map(QueueItem.Task(message.param[String](QueueName), message.token,
           message.param[Int](TaskPriority), _, message.getData[Any]))
+          message.param[Int](TaskPriority), _, message.getData[Any], message.optionalParam[Long](ScheduleTime)))
       }
       case MessageType.FUNCTION_CALL if message.path == "/ack" => {
         message.timestamp.map(QueueItem.Ack(message.param[String](QueueName), message.token,
@@ -504,6 +505,7 @@ object LogQueue {
     item match {
       case taskItem: QueueItem.Task => {
         createSyntheticRequest(taskItem.taskId, taskItem.taskId, taskItem, "/enqueue", taskItem.data)
+        createSyntheticRequest(taskItem.taskId, taskItem.taskId, taskItem, "/enqueue", taskItem.data, taskItem.scheduleTime)
       }
       case ackItem: QueueItem.Ack => createSyntheticRequest(ackItem.ackId, ackItem.taskId, ackItem, "/ack")
     }
@@ -511,8 +513,10 @@ object LogQueue {
 
   private[log] def createSyntheticRequest(itemId: Timestamp, taskId: Timestamp, item: QueueItem, path: String,
                                           data: Any = null): InMessage = {
+                                          data: Any = null, scheduleTime: Option[Long] = None): InMessage = {
     val params = Iterable[(String, MValue)](QueueName -> item.name, TaskId -> taskId.value, TaskToken -> item.token,
       TaskPriority -> item.priority)
+      TaskPriority -> item.priority) ++ scheduleTime.map(t => ScheduleTime -> MLong(t))
     val request = new InMessage(params, data = data)
     request.token = item.token
     request.timestamp = Some(itemId)
