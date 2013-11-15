@@ -5,14 +5,14 @@ import com.wajam.nrv.data.MValue
 import com.wajam.nrv.data.MValue._
 import com.wajam.bwl.queue._
 import scala.concurrent.{ ExecutionContext, Future }
-import com.wajam.bwl.queue.Queue.QueueFactory
+import com.wajam.bwl.queue.QueueFactory
 import com.wajam.spnl._
 import com.wajam.bwl.queue.QueueDefinition
 import com.wajam.nrv.data.MInt
 import com.wajam.commons.Logging
 import scala.util.Random
 
-class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefinition], protected val createQueue: QueueFactory,
+class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefinition], protected val queueFactory: QueueFactory,
           spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)(implicit random: Random = Random)
     extends Service(serviceName) with Logging {
 
@@ -75,7 +75,7 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
   }
 
   private def createQueueWrapper(member: ServiceMember, definition: QueueDefinition): QueueWrapper = {
-    val queue = createQueue(member.token, definition, this)
+    val queue = queueFactory.createQueue(member.token, definition, this)
     val persistence = taskPersistenceFactory.createServiceMemberPersistence(this, member)
 
     // TODO: allow per queue timeout???
