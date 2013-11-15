@@ -234,6 +234,7 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
     }
 
     new DelayedPriorityTaskItemReader(recorder, createLogTaskReader)
+    new LazyPriorityTaskItemReader(recorder, createLogTaskReader)
   }
 
   /**
