@@ -11,6 +11,7 @@ import org.mockito.Matchers.{ eq => argEquals }
 import org.mockito.Mockito._
 import org.mockito.ArgumentCaptor
 import scala.collection.JavaConversions._
+import scala.util.Random
 
 @RunWith(classOf[JUnitRunner])
 class TestBwl extends FunSuite {
@@ -173,6 +174,71 @@ class TestBwl extends FunSuite {
       Thread.sleep(500)
       verify(spyQueue, never()).ack(ackCaptor.capture())
       ackCaptor.getAllValues.size() should be(0)
+    })
+  }
+
+  test("fail callback should retry") {
+
+    import BwlTestHelper._
+
+    // Reduce SPNL retry delay with a Random that always returns 0
+    implicit val random = new Random(new java.util.Random() {
+      override def next(bits: Int) = 0
+    })
+
+    implicit val spyQueueFactory = new SpyQueueFactory(memoryQueueFactory)
+
+    new FailCallbackFixture() with BwlFixture with SinglePriorityQueueFixture {}.runWithFixture((f) => {
+      import ExecutionContext.Implicits.global
+
+      f.bwl.enqueue(0, f.definitions.head.name, "hello")
+
+      // Would retry forever but we stop waiting at 5
+      waitForCondition() {
+        f.callbackCallCount > 5
+      }
+
+      val spyQueue = spyQueueFactory.allQueues.head
+      val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
+      val ackCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Ack])
+      verify(spyQueue).enqueue(taskCaptor.capture())
+      taskCaptor.getAllValues.size() should be(1)
+
+      verify(spyQueue, never()).ack(ackCaptor.capture())
+      ackCaptor.getAllValues.size() should be(0)
+    })
+
+  }
+
+  test("fail callback should retry until max retry") {
+
+    // Reduce SPNL retry delay with a Random that always returns 0
+    implicit val random = new Random(new java.util.Random() {
+      override def next(bits: Int) = 0
+    })
+
+    implicit val spyQueueFactory = new SpyQueueFactory(memoryQueueFactory)
+
+    val maxRetryCount = 3
+
+    new FailCallbackFixture() with BwlFixture with SinglePriorityQueueFixture {
+      override def definitions = super.definitions.map(_.copy(maxRetryCount = Some(maxRetryCount)))
+    }.runWithFixture((f) => {
+      import ExecutionContext.Implicits.global
+
+      f.bwl.enqueue(0, f.definitions.head.name, "hello")
+      verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
+
+      val spyQueue = spyQueueFactory.allQueues.head
+      val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
+      val ackCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Ack])
+      verify(spyQueue, timeout(2000)).enqueue(taskCaptor.capture())
+      taskCaptor.getAllValues.size() should be(1)
+
+      verify(spyQueue, timeout(2000)).ack(ackCaptor.capture())
+      ackCaptor.getAllValues.size() should be(1)
+
+      f.callbackCallCount should be(1 + maxRetryCount)
     })
   }
 

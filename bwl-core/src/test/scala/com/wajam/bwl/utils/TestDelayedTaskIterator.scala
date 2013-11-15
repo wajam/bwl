@@ -5,7 +5,7 @@ import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
 import org.scalatest.FlatSpec
 import org.scalatest.matchers.ShouldMatchers._
-import com.wajam.commons.{CurrentTime, ControlableCurrentTime}
+import com.wajam.commons.{ CurrentTime, ControlableCurrentTime }
 import com.wajam.bwl.queue.QueueItem
 
 @RunWith(classOf[JUnitRunner])
@@ -78,8 +78,7 @@ class TestDelayedTaskIterator extends FlatSpec {
       task(1, 1, Some(timer.currentTime + delay * 2)),
       task(2, 1, Some(timer.currentTime + delay)),
       task(3, 1),
-      task(4, 1)
-    ).map(Option(_))
+      task(4, 1)).map(Option(_))
     val itr = delayedTaskIterator(tasks, timer)
 
     itr.hasNext should be(true)
@@ -109,8 +108,7 @@ class TestDelayedTaskIterator extends FlatSpec {
       task(1, 1, Some(timer.currentTime + delay)),
       task(2, 1, Some(timer.currentTime + delay)),
       task(3, 1, Some(timer.currentTime + delay)),
-      task(4, 1, Some(timer.currentTime + delay))
-    ).map(Option(_))
+      task(4, 1, Some(timer.currentTime + delay))).map(Option(_))
     val itr = delayedTaskIterator(tasks, timer)
 
     itr.hasNext should be(true)

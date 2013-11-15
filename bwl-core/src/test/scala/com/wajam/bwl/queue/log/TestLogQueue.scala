@@ -15,6 +15,7 @@ import com.wajam.nrv.consistency.ConsistencyOne
 import org.scalatest.matchers.ShouldMatchers._
 import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
+import com.wajam.bwl.BwlTestHelper._
 import com.wajam.bwl.QueueStatsHelper._
 import com.wajam.bwl.FeederTestHelper._
 import com.wajam.nrv.utils.timestamp.Timestamp

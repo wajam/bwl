@@ -9,7 +9,7 @@ import org.scalatest.matchers.ShouldMatchers._
 import org.scalatest.mock.MockitoSugar
 import com.wajam.commons.ControlableCurrentTime
 import com.wajam.nrv.service.Service
-import com.wajam.bwl.queue.{QueueItem, QueueTask}
+import com.wajam.bwl.queue.{ QueueItem, QueueTask }
 import com.wajam.bwl.FeederTestHelper._
 import com.wajam.bwl.QueueStatsHelper
 import com.wajam.bwl.queue.Priority
@@ -94,7 +94,7 @@ class TestMemoryQueue extends FlatSpec with MockitoSugar {
     val definition: QueueDefinition = QueueDefinition("name", (_) => mock[Future[QueueTask.Result]], priorities = priorities)
     val queue = MemoryQueue.create(0, definition, mock[Service])(random)
 
-    for(priority <- 1 to 2; i <- 1 to 100) {
+    for (priority <- 1 to 2; i <- 1 to 100) {
       queue.enqueue(task(priority, priority))
     }
 

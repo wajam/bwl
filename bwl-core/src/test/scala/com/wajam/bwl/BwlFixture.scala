@@ -29,9 +29,11 @@ trait BwlFixture extends CallbackFixture with MockitoSugar {
 
   def definitions: Seq[QueueDefinition]
 
-  def createBwlService(queueFactory: QueueFactory) = new Bwl("bwl", definitions, queueFactory.factory, new Spnl)
+  def createBwlService(queueFactory: QueueFactory)(implicit random: Random = Random) = {
+    new Bwl("bwl", definitions, queueFactory.factory, new Spnl)
+  }
 
-  def runWithFixture(test: (BwlFixture) => Any)(implicit queueFactory: QueueFactory) {
+  def runWithFixture(test: (BwlFixture) => Any)(implicit queueFactory: QueueFactory, random: Random = Random) {
     try {
       queueFactory.before()
 
@@ -66,11 +68,11 @@ trait ConsistentBwlFixture extends BwlFixture {
 
   def consistentBwl: ConsistentBwl = bwl.asInstanceOf[ConsistentBwl]
 
-  override def createBwlService(queueFactory: QueueFactory) = {
+  override def createBwlService(queueFactory: QueueFactory)(implicit random: Random = Random) = {
     new Bwl("consistent-bwl", definitions, queueFactory.factory, new Spnl) with ConsistentBwl
   }
 
-  def runWithConsistentFixture(test: (ConsistentBwlFixture) => Any)(implicit queueFactory: QueueFactory) {
+  def runWithConsistentFixture(test: (ConsistentBwlFixture) => Any)(implicit queueFactory: QueueFactory, random: Random = Random) {
     runWithFixture((f) => {
       test(f.asInstanceOf[ConsistentBwlFixture])
     })
@@ -145,6 +147,9 @@ trait CallbackFixture extends MockitoSugar {
 
   val mockCallback: MockableCallback = mock[MockableCallback]
 
+  @volatile
+  var callbackCallCount: Int = 0
+
   def taskCallback: QueueTask.Callback
 }
 
@@ -154,6 +159,7 @@ abstract class OkCallbackFixture(delay: Long = 0L) extends CallbackFixture {
   import ExecutionContext.Implicits.global
 
   def taskCallback = (data) => future {
+    callbackCallCount += 1
     Thread.sleep(delay)
     mockCallback.process(data)
     QueueTask.Result.Ok
@@ -167,6 +173,7 @@ abstract class FailCallbackFixture(ignore: Boolean = false, delay: Long = 0L) ex
   import ExecutionContext.Implicits.global
 
   def taskCallback = (data) => future {
+    callbackCallCount += 1
     Thread.sleep(delay)
     mockCallback.process(data)
     QueueTask.Result.Fail(new Exception(), ignore)
