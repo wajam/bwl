@@ -3,6 +3,7 @@ package com.wajam.bwl.queue.log
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
 import org.scalatest.FlatSpec
+import com.wajam.commons.{ CurrentTime, ControlableCurrentTime }
 import com.wajam.nrv.service.{ TokenRange, Service, ServiceMember }
 import com.wajam.bwl.QueueResource
 import com.wajam.nrv.cluster.LocalNode
@@ -23,7 +24,7 @@ import com.wajam.commons.Closable.using
 @RunWith(classOf[JUnitRunner])
 class TestLogQueue extends FlatSpec {
 
-  private def task(taskId: Long, priority: Int = 1) = QueueItem.Task("name", taskId, priority, taskId, data = taskId)
+  private def task(taskId: Long, priority: Int = 1, executeAfter: Option[Long] = None) = QueueItem.Task("name", taskId, priority, taskId, data = taskId, executeAfter)
 
   trait QueueService extends MockitoSugar {
     val member = new ServiceMember(0, new LocalNode(Map("nrv" -> 34578)))
@@ -45,7 +46,7 @@ class TestLogQueue extends FlatSpec {
 
     // Execute specified test with a log queue factory. The test can create multiple queue instances but must stop
     // using the previously created instance. All queue instances are backed by the same log files.
-    def withQueueFactory(test: (() => LogQueue) => Any, logCleanFrequencyInMs: Long = Long.MaxValue) {
+    def withQueueFactory(test: (() => LogQueue) => Any, logCleanFrequencyInMs: Long = Long.MaxValue)(implicit clock: CurrentTime = new CurrentTime {}) {
       var queues: List[Queue] = Nil
       val dataDir = Files.createTempDirectory("TestLogQueue").toFile
       try {
@@ -136,6 +137,43 @@ class TestLogQueue extends FlatSpec {
       queue4.stats.verifyEqualsTo(totalTasks = 2, pendingTasks = Nil)
       queue4.feeder.take(20).flatten.toList should be(List(t2, t3).map(_.toFeederData))
       queue4.stats.verifyEqualsTo(totalTasks = 2, pendingTasks = List(t2, t3))
+    })
+  }
+
+  it should "enqueue and produce delayed tasks in expected order" in new QueueService {
+    implicit val clock = new ControlableCurrentTime {}
+    val delay = 10000L
+
+    withQueueFactory(createQueue => {
+
+      // ####################
+      // Create a brand new empty queue
+      val queue1 = createQueue()
+
+      // Enqueue
+      val t1 = queue1.enqueue(task(taskId = 1L, priority = 1, Some(clock.currentTime + delay)))
+      val t2 = queue1.enqueue(task(taskId = 2L, priority = 1))
+      val t3 = queue1.enqueue(task(taskId = 3L, priority = 1))
+      waitForFeederData(queue1.feeder)
+
+      // Verification after enqueue
+      queue1.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = Nil, delayedTasks = List(t1))
+      queue1.feeder.take(20).flatten.toList should be(List(t2, t3).map(_.toFeederData))
+      queue1.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = List(t2, t3), delayedTasks = List(t1))
+      queue1.stop()
+
+      // ####################
+      // Create a new queue instance without acknowledging any tasks. Should reload the same state.
+      val queue2 = createQueue()
+      waitForFeederData(queue2.feeder)
+      queue2.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = Nil, delayedTasks = List(t1))
+      queue2.feeder.take(20).flatten.toList should be(List(t2, t3).map(_.toFeederData))
+      queue2.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = List(t2, t3), delayedTasks = List(t1))
+
+      clock.advanceTime(delay)
+
+      queue2.feeder.take(20).flatten.toList should be(List(t1).map(_.toFeederData))
+      queue2.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = List(t1, t2, t3), delayedTasks = Nil)
     })
   }
 
