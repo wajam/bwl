@@ -47,6 +47,16 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
 
   protected def definitionFor(queueName: String): QueueDefinition = definitionsMap(queueName)
 
+  protected def queueViews(serviceName: String): Iterable[QueueView] = queues.valuesIterator.map {
+    case QueueWrapper(queue, _) => new QueueView {
+      def name = queue.name
+
+      def priorities = queue.priorities
+
+      def stats = queue.stats
+    }
+  }.toIterable
+
   /**
    * Enqueue the specified task data and returns the task id if enqueued successfully .
    */
