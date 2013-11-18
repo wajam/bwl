@@ -120,6 +120,7 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
     var actualStartTimestamp: Option[Timestamp] = None
 
     val mockReader = mock[PriorityTaskItemReader]
+    when(mockReader.next()).thenReturn(None)
     def createReader(priority: Int, startTimestamp: Option[Timestamp]): PriorityTaskItemReader = {
       actualStartTimestamp = startTimestamp
       mockReader
