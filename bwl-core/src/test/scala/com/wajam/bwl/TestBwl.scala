@@ -18,7 +18,7 @@ class TestBwl extends FunSuite {
 
   import BwlFixture._
 
-  def singlePriorityQueue(implicit queueFactory: QueueFactory) {
+  def singlePriorityQueue(implicit queueFactory: FixtureQueueFactory) {
 
     test(queueFactory.name + " - queue should enqueue and dequeue expected value") {
       new OkCallbackFixture with BwlFixture with SinglePriorityQueueFixture {}.runWithFixture((f) => {
@@ -32,7 +32,7 @@ class TestBwl extends FunSuite {
 
   }
 
-  def multiplePrioritiesQueue(implicit queueFactory: QueueFactory) {
+  def multiplePrioritiesQueue(implicit queueFactory: FixtureQueueFactory) {
 
     test(queueFactory.name + " - enqueued priority weights should be respected") {
       import ExecutionContext.Implicits.global

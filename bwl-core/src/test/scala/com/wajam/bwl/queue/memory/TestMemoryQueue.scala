@@ -88,11 +88,11 @@ class TestMemoryQueue extends FlatSpec with MockitoSugar {
   }
 
   it should "produce expected task priority distribution" in {
-    val random = new Random(seed = 999)
+    implicit val random = new Random(seed = 999)
 
     val priorities = List(Priority(1, weight = 66), Priority(2, weight = 33))
     val definition: QueueDefinition = QueueDefinition("name", (_) => mock[Future[QueueTask.Result]], priorities = priorities)
-    val queue = MemoryQueue.create(0, definition, mock[Service])(random)
+    val queue = new MemoryQueue.Factory().createQueue(0, definition, mock[Service])
 
     for (priority <- 1 to 2; i <- 1 to 100) {
       queue.enqueue(task(priority, priority))

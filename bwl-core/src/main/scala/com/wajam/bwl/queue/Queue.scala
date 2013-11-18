@@ -85,8 +85,8 @@ trait Queue {
   def stop()
 }
 
-object Queue {
-  type QueueFactory = (Long, QueueDefinition, Service) => Queue
+trait QueueFactory {
+  def createQueue(token: Long, definition: QueueDefinition, service: Service): Queue
 }
 
 object QueueTask {

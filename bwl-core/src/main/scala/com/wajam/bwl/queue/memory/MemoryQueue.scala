@@ -94,7 +94,10 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
 }
 
 object MemoryQueue {
-  def create(token: Long, definition: QueueDefinition, service: Service)(implicit random: Random = Random): Queue = {
-    new MemoryQueue(token, definition)
+
+  class Factory(implicit random: Random = Random) extends QueueFactory {
+    def createQueue(token: Long, definition: QueueDefinition, service: Service): Queue = {
+      new MemoryQueue(token, definition)
+    }
   }
 }
