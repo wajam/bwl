@@ -16,6 +16,7 @@ import com.wajam.nrv.consistency.ConsistencyOne
 import org.scalatest.matchers.ShouldMatchers._
 import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
+import com.wajam.bwl.BwlTestHelper._
 import com.wajam.bwl.QueueStatsHelper._
 import com.wajam.bwl.FeederTestHelper._
 import com.wajam.nrv.utils.timestamp.Timestamp
@@ -49,10 +50,11 @@ class TestLogQueue extends FlatSpec {
     def withQueueFactory(test: (() => LogQueue) => Any, logCleanFrequencyInMs: Long = Long.MaxValue)(implicit clock: CurrentTime = new CurrentTime {}) {
       var queues: List[Queue] = Nil
       val dataDir = Files.createTempDirectory("TestLogQueue").toFile
+      val factory = new LogQueue.Factory(dataDir, logCleanFrequencyInMs = logCleanFrequencyInMs)
       try {
 
         def createQueue: LogQueue = {
-          val queue = LogQueue.create(dataDir, logCleanFrequencyInMs = logCleanFrequencyInMs)(token = 0, definition, service)
+          val queue = factory.createQueue(token = 0, definition, service)
           queues = queue :: queues
           queue.start()
           queue.feeder.init(definition.taskContext)

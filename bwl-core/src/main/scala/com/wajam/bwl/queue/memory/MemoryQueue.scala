@@ -19,7 +19,7 @@ import com.wajam.bwl.queue.QueueDefinition
 /**
  * Simple memory queue. MUST not be used in production.
  */
-class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit random: Random = Random) extends Queue with CurrentTime {
+class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit random: Random = Random, clock: CurrentTime = new CurrentTime {}) extends Queue {
   self =>
 
   private val selector = new PrioritySelector(priorities)
@@ -27,8 +27,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
   private var pendingTasks: Map[Timestamp, QueueItem.Task] = TreeMap()
 
   private val delayedTaskIterator = new DelayedTaskIterator(
-    Iterator.continually(
-      queues(selector.next).poll()).map(Option(_)), this)
+    Iterator.continually(queues(selector.next).poll()).map(Option(_)), clock)
 
   private val taskIterator = PeekIterator(delayedTaskIterator)
 
@@ -90,12 +89,15 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
 
     def pendingTasks = self.pendingTasks.values
 
-    def delayedTasks = delayedTaskIterator.delayedTasks
+    def delayedTasks = delayedTaskIterator.delayedTasks.toIterable
   }
 }
 
 object MemoryQueue {
-  def create(token: Long, definition: QueueDefinition, service: Service)(implicit random: Random = Random): Queue = {
-    new MemoryQueue(token, definition)
+
+  class Factory(implicit random: Random = Random, clock: CurrentTime = new CurrentTime {}) extends QueueFactory {
+    def createQueue(token: Long, definition: QueueDefinition, service: Service): Queue = {
+      new MemoryQueue(token, definition)
+    }
   }
 }

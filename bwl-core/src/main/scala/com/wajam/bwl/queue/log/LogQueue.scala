@@ -8,7 +8,7 @@ import java.io.File
 import java.nio.file.{ Files, Paths }
 import com.wajam.nrv.consistency._
 import com.wajam.nrv.service.{ TokenRange, Service }
-import com.wajam.nrv.consistency.log.{ TransactionLog, LogRecord, TimestampedRecord, FileTransactionLog }
+import com.wajam.nrv.consistency.log.{ LogRecord, TimestampedRecord, FileTransactionLog }
 import com.wajam.nrv.consistency.replication.{ ReplicationSourceIterator, TransactionLogReplicationIterator }
 import com.wajam.bwl.QueueResource._
 import com.wajam.bwl.queue.Priority
@@ -425,62 +425,59 @@ object LogQueue {
 
   type RecorderFactory = (Long, QueueDefinition, Priority) => TransactionRecorder
 
-  /**
-   * Creates a new LogQueue. This factory method is usable as [[com.wajam.bwl.queue.Queue.QueueFactory]] with the
-   * Bwl service
-   */
-  def create(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000,
-             logCleanFrequencyInMs: Long = 3600000L)(token: Long, definition: QueueDefinition, service: Service)(implicit random: Random = Random, clock: CurrentTime = new CurrentTime {}): ConsistentQueue = {
+  class Factory(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000,
+                logCleanFrequencyInMs: Long = 3600000L)(implicit random: Random = Random, clock: CurrentTime = new CurrentTime {}) extends QueueFactory {
+    def createQueue(token: Long, definition: QueueDefinition, service: Service) = {
+      Logger.debug(s"Create log queue '$token:${definition.name}'")
 
-    Logger.debug(s"Create log queue '$token:${definition.name}'")
+      val logDir = Paths.get(dataDir.getCanonicalPath, service.name, "queues")
+      Files.createDirectories(logDir)
 
-    val logDir = Paths.get(dataDir.getCanonicalPath, service.name, "queues")
-    Files.createDirectories(logDir)
-
-    def consistencyDelay: Long = {
-      val timestampTimeout = service.consistency match {
-        case consistency: ConsistencyMasterSlave => consistency.timestampGenerator.responseTimeout
-        case _ => 0
-      }
-      timestampTimeout + 250
-    }
-
-    def queueNameFor(priority: Priority) = s"${definition.name}#${priority.value}"
-
-    def txLogFor(priority: Priority) = new FileTransactionLog(queueNameFor(priority), token, logDir.toString, logFileRolloverSize)
-
-    def memberFor(priority: Priority) = {
-      val ranges = ResolvedServiceMember(service, token).ranges
-      ResolvedServiceMember(queueNameFor(priority), token, ranges)
-    }
-
-    /**
-     * Ensure the specified priority log tail is properly ended by an Index record.
-     */
-    def finalizeLog(priority: Priority) {
-      val txLog = txLogFor(priority)
-      txLog.getLastLoggedRecord match {
-        case Some(record: TimestampedRecord) => {
-          // Not ended by an Index record. We need to rewrite the log tail to find the last record timestamp.
-          val recovery = new ConsistencyRecovery(txLog.logDir, DummyTruncatableConsistentStore)
-          recovery.rewriteFromRecord(record, txLog, memberFor(priority))
+      def consistencyDelay: Long = {
+        val timestampTimeout = service.consistency match {
+          case consistency: ConsistencyMasterSlave => consistency.timestampGenerator.responseTimeout
+          case _ => 0
         }
-        case Some(_: Index) => // Nothing to do, the log is ended by an Index record!!!
-        case None => // Nothing to do, the log is empty.
+        timestampTimeout + 250
       }
+
+      def queueNameFor(priority: Priority) = s"${definition.name}#${priority.value}"
+
+      def txLogFor(priority: Priority) = new FileTransactionLog(queueNameFor(priority), token, logDir.toString, logFileRolloverSize)
+
+      def memberFor(priority: Priority) = {
+        val ranges = ResolvedServiceMember(service, token).ranges
+        ResolvedServiceMember(queueNameFor(priority), token, ranges)
+      }
+
+      /**
+       * Ensure the specified priority log tail is properly ended by an Index record.
+       */
+      def finalizeLog(priority: Priority) {
+        val txLog = txLogFor(priority)
+        txLog.getLastLoggedRecord match {
+          case Some(record: TimestampedRecord) => {
+            // Not ended by an Index record. We need to rewrite the log tail to find the last record timestamp.
+            val recovery = new ConsistencyRecovery(txLog.logDir, DummyTruncatableConsistentStore)
+            recovery.rewriteFromRecord(record, txLog, memberFor(priority))
+          }
+          case Some(_: Index) => // Nothing to do, the log is ended by an Index record!!!
+          case None => // Nothing to do, the log is empty.
+        }
+      }
+
+      // Ensure that all logs are properly finalized with an Index record
+      definition.priorities.foreach(finalizeLog)
+
+      val truncateTracker = new TruncateTracker(new File(logDir.toFile, s"${definition.name}.truncate"))
+
+      val recorderFactory: RecorderFactory = (token, definition, priority) => {
+        Logger.debug(s"Create recorder '$token:${queueNameFor(priority)}'")
+        new TransactionRecorder(memberFor(priority), txLogFor(priority), consistencyDelay, service.responseTimeout, logCommitFrequency, {})
+      }
+
+      new LogQueue(token, definition, recorderFactory, logCleanFrequencyInMs, truncateTracker)
     }
-
-    // Ensure that all logs are properly finalized with an Index record
-    definition.priorities.foreach(finalizeLog)
-
-    val truncateTracker = new TruncateTracker(new File(logDir.toFile, s"${definition.name}.truncate"))
-
-    val recorderFactory: RecorderFactory = (token, definition, priority) => {
-      Logger.debug(s"Create recorder '$token:${queueNameFor(priority)}'")
-      new TransactionRecorder(memberFor(priority), txLogFor(priority), consistencyDelay, service.responseTimeout, logCommitFrequency, {})
-    }
-
-    new LogQueue(token, definition, recorderFactory, logCleanFrequencyInMs, truncateTracker)
   }
 
   private[log] def message2item(message: Message): Option[QueueItem] = {

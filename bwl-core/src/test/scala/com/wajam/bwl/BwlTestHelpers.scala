@@ -7,8 +7,21 @@ import language.implicitConversions
 import com.wajam.bwl.queue.{ QueueItem, QueueStats }
 import org.scalatest.matchers.ShouldMatchers._
 
-// TODO: Add in SPNL. This is a copy of a class also present in MRY
+object BwlTestHelper {
+  def waitForCondition(timeoutInMs: Long = 2000L, sleepTimeInMs: Long = 50L)(predicate: => Boolean) {
+    val startTime = System.currentTimeMillis()
+    while (!predicate) {
+      val elapseTime = System.currentTimeMillis() - startTime
+      if (elapseTime > timeoutInMs) {
+        throw new RuntimeException(s"Timeout waiting for condition after $elapseTime ms.")
+      }
+      Thread.sleep(sleepTimeInMs)
+    }
+  }
+}
+
 object FeederTestHelper {
+  // TODO: Add in SPNL. This is a copy of a class also present in MRY
   implicit def feederToIterator(feeder: Feeder): Iterator[Option[FeederData]] with Closable = {
 
     new Iterator[Option[FeederData]] with Closable {
@@ -20,16 +33,7 @@ object FeederTestHelper {
     }
   }
 
-  def waitForCondition(timeoutInMs: Long = 2000L, sleepTimeInMs: Long = 50L)(predicate: => Boolean) {
-    val startTime = System.currentTimeMillis()
-    while (!predicate) {
-      val elapseTime = System.currentTimeMillis() - startTime
-      if (elapseTime > timeoutInMs) {
-        throw new RuntimeException(s"Timeout waiting for condition after $elapseTime ms.")
-      }
-      Thread.sleep(sleepTimeInMs)
-    }
-  }
+  import BwlTestHelper._
 
   /**
    * Wait until specified feeder is ready to produce non empty data or the timeout is reach.

@@ -17,7 +17,7 @@ class TestConsistentBwl extends FlatSpec {
   import BwlFixture._
 
   "ConsistentBwl" should "requires consistency for task and ack messages for consistent queue" in {
-    implicit val queueFactory: QueueFactory = persistentQueueFactory
+    implicit val queueFactory: FixtureQueueFactory = persistentQueueFactory
 
     new OkCallbackFixture with ConsistentBwlFixture with MultiplePriorityQueueFixture {}.runWithConsistentFixture((f) => {
       val taskItem = QueueItem.Task(f.definitions.head.name, 1L, 1, 1L, "hello")
@@ -35,7 +35,7 @@ class TestConsistentBwl extends FlatSpec {
   }
 
   it should "NOT require consistency for task and ack messages for NON consistent queue" in {
-    implicit val queueFactory: QueueFactory = memoryQueueFactory
+    implicit val queueFactory: FixtureQueueFactory = memoryQueueFactory
 
     new OkCallbackFixture with ConsistentBwlFixture with MultiplePriorityQueueFixture {}.runWithConsistentFixture((f) => {
       val taskItem = QueueItem.Task(f.definitions.head.name, 1L, 1, 1L, "hello")
@@ -49,7 +49,7 @@ class TestConsistentBwl extends FlatSpec {
   }
 
   it should "reads task and ack messages" in {
-    implicit val queueFactory: QueueFactory = persistentQueueFactory
+    implicit val queueFactory: FixtureQueueFactory = persistentQueueFactory
     import ExecutionContext.Implicits.global
 
     new OkCallbackFixture with ConsistentBwlFixture with MultipleQueuesFixture {}.runWithConsistentFixture((f) => {
@@ -78,7 +78,7 @@ class TestConsistentBwl extends FlatSpec {
   }
 
   it should "write task and ack messages" in {
-    implicit val queueFactory: QueueFactory = persistentQueueFactory
+    implicit val queueFactory: FixtureQueueFactory = persistentQueueFactory
 
     new OkCallbackFixture with ConsistentBwlFixture with MultipleQueuesFixture {}.runWithConsistentFixture((f) => {
 

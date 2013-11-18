@@ -5,13 +5,14 @@ import com.wajam.nrv.data.{ MLong, MValue, MInt }
 import com.wajam.nrv.data.MValue._
 import com.wajam.bwl.queue._
 import scala.concurrent.{ ExecutionContext, Future }
-import com.wajam.bwl.queue.Queue.QueueFactory
+import com.wajam.bwl.queue.QueueFactory
 import com.wajam.spnl._
 import com.wajam.bwl.queue.QueueDefinition
 import com.wajam.commons.{ CurrentTime, Logging }
+import scala.util.Random
 
-class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefinition], protected val createQueue: QueueFactory,
-          spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)
+class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefinition], protected val queueFactory: QueueFactory,
+          spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)(implicit random: Random = Random)
     extends Service(serviceName) with Logging with CurrentTime {
 
   protected case class QueueWrapper(queue: Queue, task: Task) {
@@ -73,12 +74,12 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
   }
 
   private def createQueueWrapper(member: ServiceMember, definition: QueueDefinition): QueueWrapper = {
-    val queue = createQueue(member.token, definition, this)
+    val queue = queueFactory.createQueue(member.token, definition, this)
     val persistence = taskPersistenceFactory.createServiceMemberPersistence(this, member)
 
     // TODO: allow per queue timeout???
-    val taskAction = new TaskAction(definition.name, queueCallbackAdapter(definition), responseTimeout)
-    val task = new Task(queue.feeder, taskAction, persistence, queue.definition.taskContext)
+    val taskAction = new TaskAction(s"${serviceName}_${definition.name}", queueCallbackAdapter(definition), responseTimeout)
+    val task = new Task(queue.feeder, taskAction, persistence, queue.definition.taskContext, random)
 
     QueueWrapper(queue, task)
   }
@@ -101,41 +102,53 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
       }
     }
 
-    val startTime = System.currentTimeMillis()
     val data = request.message.getData[TaskData]
     val taskToken = data.token
     val taskId = data.values(TaskId).toString.toLong
     val priority = data.values(TaskPriority).toString.toInt
 
-    def executeIfCallbackNotExpired(function: => Any) {
-      val elapsedTime = System.currentTimeMillis() - startTime
-      trace(s"'Task $taskId ($taskToken:${definition.name}#$priority) callback elapsedTime: $elapsedTime")
-      if (elapsedTime < callbackTimeout) {
-        function
-      } else {
-        warn(s"Task $taskId ($taskToken:${definition.name}#$priority) $taskId' callback took too much time to execute ($elapsedTime ms)")
+    definition.maxRetryCount match {
+      case Some(maxRetryCount) if data.retryCount > maxRetryCount => {
+        // Task max retry count reach. Do not execute callback.
+        ack(taskToken, definition.name, taskId, priority)
+        val msg = s"Task $taskId ($taskToken:${definition.name}#$priority) not executed. Maximum retry count ($maxRetryCount) reached."
+        request.ignore(new Exception(msg))
+        warn(msg)
       }
+      case _ => executeCallback()
     }
 
-    val response = definition.callback(data.values("data"))
-    response.onSuccess {
-      case Result.Ok => {
-        executeIfCallbackNotExpired {
+    def executeCallback() {
+      val startTime = System.currentTimeMillis()
+
+      def executeIfCallbackNotExpired(function: => Any) {
+        val elapsedTime = System.currentTimeMillis() - startTime
+        trace(s"'Task $taskId ($taskToken:${definition.name}#$priority) callback elapsedTime: $elapsedTime")
+        if (elapsedTime < callbackTimeout) {
+          function
+        } else {
+          warn(s"Task $taskId ($taskToken:${definition.name}#$priority) callback took too much time to execute ($elapsedTime ms)")
+        }
+      }
+
+      val response = definition.callback(data.values("data"))
+      response.onSuccess {
+        case Result.Ok => executeIfCallbackNotExpired {
           ack(taskToken, definition.name, taskId, priority)
           request.ok()
         }
-      }
-      case Result.Fail(error, ignore) if ignore => {
-        executeIfCallbackNotExpired {
+        case Result.Fail(error, ignore) if ignore => executeIfCallbackNotExpired {
           ack(taskToken, definition.name, taskId, priority)
           request.ignore(error)
         }
+        case Result.Fail(error, ignore) => executeIfCallbackNotExpired {
+          request.fail(error)
+        }
       }
-      case Result.Fail(error, ignore) => request.fail(error)
-    }
-    response.onFailure {
-      case e: Exception => request.fail(e)
-      case t => request.fail(new Exception(t))
+      response.onFailure {
+        case e: Exception => request.fail(e)
+        case t => request.fail(new Exception(t))
+      }
     }
   }
 

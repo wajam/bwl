@@ -16,7 +16,8 @@ class PrioritySelector(priorities: Iterable[Priority])(implicit random: Random =
   extends WeightedItemsSelector(priorities.map(p => (p.weight.toDouble, p.value)))
 
 case class QueueDefinition(name: String, callback: QueueTask.Callback, taskContext: TaskContext = new TaskContext,
-                           priorities: Iterable[Priority] = Seq(Priority(1, weight = 1)))
+                           priorities: Iterable[Priority] = Seq(Priority(1, weight = 1)),
+                           maxRetryCount: Option[Int] = None)
 
 sealed trait QueueItem {
   def itemId: Timestamp
@@ -84,8 +85,8 @@ trait Queue {
   def stop()
 }
 
-object Queue {
-  type QueueFactory = (Long, QueueDefinition, Service) => Queue
+trait QueueFactory {
+  def createQueue(token: Long, definition: QueueDefinition, service: Service): Queue
 }
 
 object QueueTask {
