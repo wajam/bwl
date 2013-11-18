@@ -6,7 +6,7 @@ import com.wajam.bwl.queue.QueueItem
 import scala.collection.immutable.TreeMap
 import com.wajam.spnl.TaskContext
 import com.wajam.bwl.queue.{ QueueDefinition, PrioritySelector }
-import com.wajam.bwl.utils.{DelayedTaskIterator, FeederPositionTracker, PeekIterator}
+import com.wajam.bwl.utils.{ DelayedTaskIterator, FeederPositionTracker, PeekIterator }
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.bwl.QueueResource._
 import com.wajam.spnl.feeder.Feeder._
@@ -87,7 +87,7 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
 
     // Update task context with oldest processed or delayed item for the acknowledged item priority
     val oldestPendingTaskId = trackers(priority).oldestItemId
-    val oldestDelayedTaskId = delayedTaskIterator.delayedTasks.headOption.map { case ((_, taskId), _) => taskId }
+    val oldestDelayedTaskId = delayedTaskIterator.delayedTasks.toIterable.headOption.map(_.taskId)
     val position: Option[Timestamp] = (oldestPendingTaskId, oldestDelayedTaskId) match {
       case (Some(pending), Some(delayed)) => Some(math.min(pending.value, delayed.value))
       case (id @ Some(_), None) => id
@@ -105,7 +105,7 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
 
   def pendingTasks: Iterator[QueueItem.Task] = pendingItems.valuesIterator
 
-  def delayedTasks: Iterator[QueueItem.Task] = delayedTaskIterator.delayedTasks.valuesIterator
+  def delayedTasks: Iterator[QueueItem.Task] = delayedTaskIterator.delayedTasks
 
   /**
    * Returns the oldest task id processed (when feeder is idle) or currently scheduled to be processed (either pending or delayed).

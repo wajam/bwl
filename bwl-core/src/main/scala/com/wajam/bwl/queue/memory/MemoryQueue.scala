@@ -28,9 +28,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
 
   private val delayedTaskIterator = new DelayedTaskIterator(
     Iterator.continually(
-      queues(selector.next).poll()
-    ).map(Option(_))
-  , this)
+      queues(selector.next).poll()).map(Option(_)), this)
 
   private val taskIterator = PeekIterator(delayedTaskIterator)
 
@@ -92,7 +90,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
 
     def pendingTasks = self.pendingTasks.values
 
-    def delayedTasks = delayedTaskIterator.delayedTasks.values
+    def delayedTasks = delayedTaskIterator.delayedTasks
   }
 }
 

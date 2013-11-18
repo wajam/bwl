@@ -13,7 +13,7 @@ class DelayedTaskIterator(itr: Iterator[Option[QueueItem.Task]], clock: CurrentT
   // Tasks are indexed with a tuple of (scheduleTime, taskId) to ensure both uniqueness and ordering
   private var _delayedTasks: Map[(Long, Timestamp), QueueItem.Task] = TreeMap()
 
-  def delayedTasks = _delayedTasks
+  def delayedTasks = _delayedTasks.valuesIterator
 
   private def isReady(scheduleTime: Long): Boolean = clock.currentTime >= scheduleTime
 
