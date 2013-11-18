@@ -1,6 +1,5 @@
 package com.wajam.bwl.queue.memory
 
-import scala.concurrent.Future
 import scala.util.Random
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
@@ -9,7 +8,7 @@ import org.scalatest.matchers.ShouldMatchers._
 import org.scalatest.mock.MockitoSugar
 import com.wajam.commons.ControlableCurrentTime
 import com.wajam.nrv.service.Service
-import com.wajam.bwl.queue.{ QueueItem, QueueTask }
+import com.wajam.bwl.queue._
 import com.wajam.bwl.FeederTestHelper._
 import com.wajam.bwl.QueueStatsHelper
 import com.wajam.bwl.queue.Priority
@@ -22,7 +21,7 @@ class TestMemoryQueue extends FlatSpec with MockitoSugar {
 
   trait WithQueue {
     val priorities = List(Priority(1, weight = 100))
-    val definition: QueueDefinition = QueueDefinition("name", (_) => mock[Future[QueueTask.Result]], priorities = priorities)
+    val definition: QueueDefinition = QueueDefinition("name", mock[QueueCallback], priorities = priorities)
     val queue = new MemoryQueue(0, definition) with ControlableCurrentTime
   }
 
@@ -88,11 +87,11 @@ class TestMemoryQueue extends FlatSpec with MockitoSugar {
   }
 
   it should "produce expected task priority distribution" in {
-    val random = new Random(seed = 999)
+    implicit val random = new Random(seed = 999)
 
     val priorities = List(Priority(1, weight = 66), Priority(2, weight = 33))
-    val definition: QueueDefinition = QueueDefinition("name", (_) => mock[Future[QueueTask.Result]], priorities = priorities)
-    val queue = MemoryQueue.create(0, definition, mock[Service])(random)
+    val definition: QueueDefinition = QueueDefinition("name", mock[QueueCallback], priorities = priorities)
+    val queue = new MemoryQueue.Factory().createQueue(0, definition, mock[Service])
 
     for (priority <- 1 to 2; i <- 1 to 100) {
       queue.enqueue(task(priority, priority))

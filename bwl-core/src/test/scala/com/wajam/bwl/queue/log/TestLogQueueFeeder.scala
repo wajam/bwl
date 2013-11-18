@@ -6,8 +6,7 @@ import org.scalatest.FlatSpec
 import org.scalatest.matchers.ShouldMatchers._
 import org.scalatest.mock.MockitoSugar
 import org.mockito.Mockito._
-import com.wajam.bwl.queue.{ Priority, QueueItem, QueueDefinition, QueueTask }
-import scala.concurrent.Future
+import com.wajam.bwl.queue._
 import com.wajam.spnl.TaskContext
 import com.wajam.bwl.FeederTestHelper._
 import com.wajam.spnl.feeder.Feeder.FeederData
@@ -19,8 +18,6 @@ import scala.util.Random
 @RunWith(classOf[JUnitRunner])
 class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
 
-  private val dummyCallback: QueueTask.Callback = (_) => mock[Future[QueueTask.Result]]
-
   private def task(id: Long, priority: Int = 1): QueueItem.Task = QueueItem.Task("name", id, priority, id, data = id)
 
   private def someTask(id: Long, priority: Int = 1): Option[QueueItem.Task] = Some(task(id, priority))
@@ -30,7 +27,7 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
   private def someFeederData(id: Long, priority: Int = 1): Option[FeederData] = Some(task(id, priority).toFeederData)
 
   "Feeder" should "returns expected name" in {
-    val feeder = new LogQueueFeeder(QueueDefinition("name", dummyCallback), (_, _) => mock[PriorityTaskItemReader])
+    val feeder = new LogQueueFeeder(QueueDefinition("name", mock[QueueCallback]), (_, _) => mock[PriorityTaskItemReader])
     feeder.name should be("name")
   }
 
@@ -39,7 +36,7 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
     when(mockReader.hasNext).thenReturn(true)
     when(mockReader.next()).thenReturn(someTask(1L), None, someTask(2L), someTask(3L), None)
     when(mockReader.delayedTasks).thenReturn(Nil)
-    val feeder = new LogQueueFeeder(QueueDefinition("name", dummyCallback), (_, _) => mockReader)
+    val feeder = new LogQueueFeeder(QueueDefinition("name", mock[QueueCallback]), (_, _) => mockReader)
     val context = TaskContext()
     feeder.init(context)
 
@@ -85,7 +82,7 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
       mockReader
     }
 
-    val feeder = new LogQueueFeeder(QueueDefinition("name", dummyCallback), createReader)
+    val feeder = new LogQueueFeeder(QueueDefinition("name", mock[QueueCallback]), createReader)
     val context = TaskContext(data = Map("1" -> expectedStartTimestamp.value))
     feeder.init(context)
     feeder.oldestTaskIdFor(1) should be(Some(expectedStartTimestamp))
@@ -117,7 +114,7 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
 
     val priorities = List(Priority(1, weight = 66), Priority(2, weight = 33))
     implicit val random = new Random(seed = 999)
-    val feeder = new LogQueueFeeder(QueueDefinition("name", dummyCallback, priorities = priorities), createReader)
+    val feeder = new LogQueueFeeder(QueueDefinition("name", mock[QueueCallback], priorities = priorities), createReader)
     val context = TaskContext()
     feeder.init(context)
 
@@ -143,7 +140,7 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
       case 2 => mockReader2
     }
 
-    val feeder = new LogQueueFeeder(QueueDefinition("name", dummyCallback, priorities = priorities), createReader)
+    val feeder = new LogQueueFeeder(QueueDefinition("name", mock[QueueCallback], priorities = priorities), createReader)
     val context = TaskContext()
     feeder.init(context)
 

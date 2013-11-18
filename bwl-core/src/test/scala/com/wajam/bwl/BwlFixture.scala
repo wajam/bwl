@@ -2,7 +2,7 @@ package com.wajam.bwl
 
 import org.scalatest.mock.MockitoSugar
 import com.wajam.nrv.cluster.{ Node, LocalNode, StaticClusterManager, Cluster }
-import com.wajam.bwl.queue.{ Priority, QueueTask, Queue, QueueDefinition }
+import com.wajam.bwl.queue._
 import com.wajam.nrv.protocol.NrvProtocol
 import com.wajam.spnl.{ TaskContext, Spnl }
 import scala.util.Random
@@ -13,8 +13,12 @@ import java.nio.file.Files
 import com.wajam.bwl.queue.log.LogQueue
 import org.apache.commons.io.FileUtils
 import org.mockito.Mockito._
-import scala.concurrent.ExecutionContext
-import com.wajam.bwl.BwlFixture.QueueFactory
+import scala.concurrent.{ Future, ExecutionContext }
+import com.wajam.bwl.BwlFixture.FixtureQueueFactory
+import org.mockito.Matchers._
+import com.wajam.bwl.queue.QueueDefinition
+import org.mockito.stubbing.Answer
+import org.mockito.invocation.InvocationOnMock
 
 trait BwlFixture extends CallbackFixture with MockitoSugar {
 
@@ -29,11 +33,11 @@ trait BwlFixture extends CallbackFixture with MockitoSugar {
 
   def definitions: Seq[QueueDefinition]
 
-  def createBwlService(queueFactory: QueueFactory)(implicit random: Random = Random) = {
+  def createBwlService(queueFactory: FixtureQueueFactory)(implicit random: Random = Random) = {
     new Bwl("bwl", definitions, queueFactory.factory, new Spnl)
   }
 
-  def runWithFixture(test: (BwlFixture) => Any)(implicit queueFactory: QueueFactory, random: Random = Random) {
+  def runWithFixture(test: (BwlFixture) => Any)(implicit queueFactory: FixtureQueueFactory, random: Random = Random) {
     try {
       queueFactory.before()
 
@@ -68,11 +72,11 @@ trait ConsistentBwlFixture extends BwlFixture {
 
   def consistentBwl: ConsistentBwl = bwl.asInstanceOf[ConsistentBwl]
 
-  override def createBwlService(queueFactory: QueueFactory)(implicit random: Random = Random) = {
+  override def createBwlService(queueFactory: FixtureQueueFactory)(implicit random: Random = Random) = {
     new Bwl("consistent-bwl", definitions, queueFactory.factory, new Spnl) with ConsistentBwl
   }
 
-  def runWithConsistentFixture(test: (ConsistentBwlFixture) => Any)(implicit queueFactory: QueueFactory, random: Random = Random) {
+  def runWithConsistentFixture(test: (ConsistentBwlFixture) => Any)(implicit queueFactory: FixtureQueueFactory, random: Random = Random) {
     runWithFixture((f) => {
       test(f.asInstanceOf[ConsistentBwlFixture])
     })
@@ -81,10 +85,8 @@ trait ConsistentBwlFixture extends BwlFixture {
 
 object BwlFixture {
 
-  trait QueueFactory {
+  trait FixtureQueueFactory {
     implicit val random = new Random(999)
-
-    type Factory = (Long, QueueDefinition, Service) => Queue
 
     def name: String
 
@@ -92,23 +94,23 @@ object BwlFixture {
 
     def after() = {}
 
-    def factory: Factory
+    def factory: QueueFactory
   }
 
-  def memoryQueueFactory = new QueueFactory {
+  def memoryQueueFactory = new FixtureQueueFactory {
     val name = "memory"
-    val factory: Factory = MemoryQueue.create
+    val factory: QueueFactory = new MemoryQueue.Factory
   }
 
-  def persistentQueueFactory = new QueueFactory {
+  def persistentQueueFactory = new FixtureQueueFactory {
     var logDir: File = null
-    var factory: Factory = null
+    var factory: QueueFactory = null
 
     val name = "persistent"
 
     override def before() = {
       logDir = Files.createTempDirectory("TestBwl").toFile
-      factory = LogQueue.create(logDir)
+      factory = new LogQueue.Factory(logDir)
     }
 
     override def after() = {
@@ -117,7 +119,7 @@ object BwlFixture {
     }
   }
 
-  class SpyQueueFactory(queueFactory: QueueFactory) extends QueueFactory {
+  class SpyQueueFactory(queueFactory: FixtureQueueFactory) extends FixtureQueueFactory {
 
     private var spyQueues: List[Queue] = Nil
 
@@ -129,69 +131,59 @@ object BwlFixture {
 
     override def after() = queueFactory.after()
 
-    def factory = createQueue
-
-    private def createQueue(token: Long, definition: QueueDefinition, service: Service): Queue = {
-      val queue = queueFactory.factory(token, definition, service)
-      spyQueues = spy[Queue](queue) :: spyQueues
-      spyQueues.head
+    def factory = new QueueFactory {
+      def createQueue(token: Long, definition: QueueDefinition, service: Service) = {
+        val queue = queueFactory.factory.createQueue(token, definition, service)
+        spyQueues = spy[Queue](queue) :: spyQueues
+        spyQueues.head
+      }
     }
   }
+
 }
 
 trait CallbackFixture extends MockitoSugar {
 
-  trait MockableCallback {
-    def process(data: QueueTask.Data)
+  val mockCallback: QueueCallback = mock[QueueCallback]
+
+  class QueueCallbackAnswer(delay: Long, result: QueueCallback.Result) extends Answer[Future[QueueCallback.Result]] {
+
+    import scala.concurrent.future
+    import ExecutionContext.Implicits.global
+
+    def answer(iom: InvocationOnMock) = future {
+      Thread.sleep(delay)
+      result
+    }
   }
 
-  val mockCallback: MockableCallback = mock[MockableCallback]
-
-  @volatile
-  var callbackCallCount: Int = 0
-
-  def taskCallback: QueueTask.Callback
 }
 
 abstract class OkCallbackFixture(delay: Long = 0L) extends CallbackFixture {
-
-  import scala.concurrent.future
-  import ExecutionContext.Implicits.global
-
-  def taskCallback = (data) => future {
-    callbackCallCount += 1
-    Thread.sleep(delay)
-    mockCallback.process(data)
-    QueueTask.Result.Ok
-  }
+  when(mockCallback.execute(anyObject())).thenAnswer(new QueueCallbackAnswer(delay, QueueCallback.Result.Ok))
 }
 
 abstract class FailCallbackFixture(ignore: Boolean = false, delay: Long = 0L) extends CallbackFixture {
   this: BwlFixture =>
 
-  import scala.concurrent.future
-  import ExecutionContext.Implicits.global
-
-  def taskCallback = (data) => future {
-    callbackCallCount += 1
-    Thread.sleep(delay)
-    mockCallback.process(data)
-    QueueTask.Result.Fail(new Exception(), ignore)
-  }
+  when(mockCallback.execute(anyObject())).thenAnswer(
+    new QueueCallbackAnswer(delay, QueueCallback.Result.Fail(new Exception(), ignore)))
 }
 
 trait SinglePriorityQueueFixture {
   this: BwlFixture with CallbackFixture =>
 
-  lazy val singlePriorityDefinition = QueueDefinition("single", taskCallback, newTaskContext)
+  lazy val singlePriorityDefinition = QueueDefinition("single", mockCallback, newTaskContext)
+
   def definitions = List(singlePriorityDefinition)
 }
 
 trait MultiplePriorityQueueFixture {
   this: BwlFixture with CallbackFixture =>
 
-  lazy val multiplePriorityDefinition = QueueDefinition("multiple", taskCallback, newTaskContext,
+  lazy val multiplePriorityDefinition = QueueDefinition("multiple", mockCallback, newTaskContext,
     priorities = List(Priority(1, weight = 66), Priority(2, weight = 33)))
+
   def definitions = List(multiplePriorityDefinition)
 }
 

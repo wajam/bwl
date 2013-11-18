@@ -48,7 +48,7 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
 
   val (scnService, scnClient) = createScnServiceAndClient()
 
-  val queueDefinitions = List(QueueDefinition("single", new DemoResource.Callback("single")))
+  val queueDefinitions = List(QueueDefinition("single", new DemoResource.DemoCallback("single")))
 
   val bwlService = createBwlService(queueDefinitions)
 
@@ -133,10 +133,10 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
       case _ => new NoTaskPersistenceFactory
     }
 
-    val queueFactory = LogQueue.create(new File(config.getBwlPersistentQueueDirectory),
+    val queueFactory = new LogQueue.Factory(new File(config.getBwlPersistentQueueDirectory),
       config.getBwlPersistentQueueRolloverSize,
       config.getBwlPersistentQueueCommitFrequency,
-      config.getBwlPersistentQueueCleanFrequency) _
+      config.getBwlPersistentQueueCleanFrequency)
 
     val service = new Bwl("bwl", definitions, queueFactory, new Spnl(), spnlPersistenceFactory) with ConsistentBwl
 

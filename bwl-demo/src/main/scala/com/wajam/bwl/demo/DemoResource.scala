@@ -6,7 +6,7 @@ import com.wajam.bwl.Bwl
 import com.wajam.nrv.data.{ MValue, InMessage }
 import scala.concurrent.ExecutionContext
 import com.wajam.commons.Logging
-import com.wajam.bwl.queue.{ QueueDefinition, QueueTask }
+import com.wajam.bwl.queue.{ QueueDefinition, QueueCallback }
 import scala.compat.Platform.EOL
 import com.wajam.nrv.service.Resolver
 
@@ -48,12 +48,12 @@ class DemoResource(bwl: Bwl, definitions: Iterable[QueueDefinition])(implicit ec
 
 object DemoResource {
 
-  class Callback(name: String)(implicit ec: ExecutionContext) extends QueueTask.Callback with Logging {
-    def apply(data: QueueTask.Data) = {
+  class DemoCallback(name: String)(implicit ec: ExecutionContext) extends QueueCallback with Logging {
+    def execute(data: Any) = {
       import scala.concurrent._
       future {
         info(s"Queue '$name' callback executed: $data")
-        QueueTask.Result.Ok
+        QueueCallback.Result.Ok
       }
     }
   }
