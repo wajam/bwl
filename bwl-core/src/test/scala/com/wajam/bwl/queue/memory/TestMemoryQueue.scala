@@ -23,7 +23,8 @@ class TestMemoryQueue extends FlatSpec with MockitoSugar {
   trait WithQueue {
     val priorities = List(Priority(1, weight = 100))
     val definition: QueueDefinition = QueueDefinition("name", (_) => mock[Future[QueueTask.Result]], priorities = priorities)
-    val queue = new MemoryQueue(0, definition) with ControlableCurrentTime
+    implicit val clock = new ControlableCurrentTime {}
+    val queue = new MemoryQueue(0, definition)
   }
 
   import QueueStatsHelper.QueueStatsVerifier
@@ -109,21 +110,21 @@ class TestMemoryQueue extends FlatSpec with MockitoSugar {
     val delay = 10000
 
     // Enqueue a task with a 10s delay
-    val t1 = queue.enqueue(task(taskId = 1L, priority = 1, Some(queue.currentTime + delay)))
+    val t1 = queue.enqueue(task(taskId = 1L, priority = 1, Some(clock.currentTime + delay)))
 
     // Enqueue regular tasks
     val t2 = queue.enqueue(task(taskId = 2L, priority = 1))
     val t3 = queue.enqueue(task(taskId = 3L, priority = 1))
 
     // Enqueue a task with a 5s delay
-    val t4 = queue.enqueue(task(taskId = 4L, priority = 1, Some(queue.currentTime + delay / 2)))
+    val t4 = queue.enqueue(task(taskId = 4L, priority = 1, Some(clock.currentTime + delay / 2)))
 
     waitForFeederData(queue.feeder, 10000L)
 
     queue.feeder.peek() should be(Some(t2.toFeederData))
     queue.feeder.next() should be(Some(t2.toFeederData))
 
-    queue.advanceTime(delay)
+    clock.advanceTime(delay)
 
     // t3 has been fetched before time was advanced
     queue.feeder.peek() should be(Some(t3.toFeederData))

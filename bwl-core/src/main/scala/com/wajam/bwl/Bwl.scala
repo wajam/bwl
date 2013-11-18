@@ -1,20 +1,19 @@
 package com.wajam.bwl
 
 import com.wajam.nrv.service.{ ServiceMember, Resolver, Service }
-import com.wajam.nrv.data.MValue
+import com.wajam.nrv.data.{ MLong, MValue, MInt }
 import com.wajam.nrv.data.MValue._
 import com.wajam.bwl.queue._
 import scala.concurrent.{ ExecutionContext, Future }
 import com.wajam.bwl.queue.QueueFactory
 import com.wajam.spnl._
 import com.wajam.bwl.queue.QueueDefinition
-import com.wajam.nrv.data.MInt
-import com.wajam.commons.Logging
+import com.wajam.commons.{ CurrentTime, Logging }
 import scala.util.Random
 
 class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefinition], protected val queueFactory: QueueFactory,
           spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)(implicit random: Random = Random)
-    extends Service(serviceName) with Logging {
+    extends Service(serviceName) with Logging with CurrentTime {
 
   protected case class QueueWrapper(queue: Queue, task: Task) {
     def start() {
@@ -50,13 +49,13 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
   /**
    * Enqueue the specified task data and returns the task id if enqueued successfully .
    */
-  def enqueue(token: Long, name: String, taskData: Any, priority: Option[Int] = None)(implicit ec: ExecutionContext): Future[Long] = {
+  def enqueue(token: Long, name: String, taskData: Any, priority: Option[Int] = None, delay: Option[Long] = None)(implicit ec: ExecutionContext): Future[Long] = {
     import com.wajam.nrv.extension.resource.ParamsAccessor._
     import QueueResource._
 
     val action = queueResource.create(this).get
 
-    val params = List[(String, MValue)](TaskToken -> token, QueueName -> name) ++ priority.map(p => TaskPriority -> MInt(p))
+    val params = List[(String, MValue)](TaskToken -> token, QueueName -> name) ++ priority.map(p => TaskPriority -> MInt(p)) ++ delay.map(t => TaskScheduleTime -> MLong(delayToScheduleTime(t)))
     val result = action.call(params = params, meta = Map(), data = taskData)
     result.map(response => response.param[Long](TaskId))
   }
@@ -152,6 +151,8 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
       }
     }
   }
+
+  private def delayToScheduleTime(delay: Long) = currentTime + delay
 
   override def start() {
     super.start()

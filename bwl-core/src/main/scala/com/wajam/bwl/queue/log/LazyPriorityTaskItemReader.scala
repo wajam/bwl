@@ -1,13 +1,13 @@
 package com.wajam.bwl.queue.log
 
 import com.wajam.nrv.consistency.TransactionRecorder
-import com.wajam.bwl.queue.log.DelayedPriorityTaskItemReader.InfiniteEmptyPriorityTaskItemReader
+import com.wajam.bwl.queue.log.LazyPriorityTaskItemReader.InfiniteEmptyPriorityTaskItemReader
 
 /**
  * Queue reader wrapper which ensure that log exists and is NOT empty before creating the real PriorityTaskItemReader.
  * Achieved by waiting until TransactionRecorder produces a valid consistent timestamp.
  */
-class DelayedPriorityTaskItemReader(recorder: TransactionRecorder, createReader: => PriorityTaskItemReader)
+class LazyPriorityTaskItemReader(recorder: TransactionRecorder, createReader: => PriorityTaskItemReader)
     extends PriorityTaskItemReader {
 
   private var reader: Option[PriorityTaskItemReader] = None
@@ -30,10 +30,9 @@ class DelayedPriorityTaskItemReader(recorder: TransactionRecorder, createReader:
     reader.foreach(_.close())
   }
 
-  def delayedTasks = getOrCreateReader.delayedTasks
 }
 
-object DelayedPriorityTaskItemReader {
+object LazyPriorityTaskItemReader {
   private object InfiniteEmptyPriorityTaskItemReader extends PriorityTaskItemReader {
     def hasNext = true
 
@@ -41,7 +40,6 @@ object DelayedPriorityTaskItemReader {
 
     def close() {}
 
-    def delayedTasks = Nil
   }
 }
 
