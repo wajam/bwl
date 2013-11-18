@@ -94,7 +94,6 @@ trait QueueCallback {
 }
 
 object QueueCallback {
-  //  case class Task(data: Any)
 
   sealed trait Result
 
@@ -103,6 +102,5 @@ object QueueCallback {
     object Ok extends Result
 
     case class Fail(error: Exception, ignore: Boolean = false) extends Result
-
   }
 }

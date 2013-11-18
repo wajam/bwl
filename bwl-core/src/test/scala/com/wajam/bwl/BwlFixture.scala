@@ -13,7 +13,7 @@ import java.nio.file.Files
 import com.wajam.bwl.queue.log.LogQueue
 import org.apache.commons.io.FileUtils
 import org.mockito.Mockito._
-import scala.concurrent._
+import scala.concurrent.{ Future, ExecutionContext }
 import com.wajam.bwl.BwlFixture.FixtureQueueFactory
 import org.mockito.Matchers._
 import com.wajam.bwl.queue.QueueDefinition
