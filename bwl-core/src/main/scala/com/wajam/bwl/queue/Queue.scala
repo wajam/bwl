@@ -15,7 +15,7 @@ case class Priority(value: Int, weight: Int)
 class PrioritySelector(priorities: Iterable[Priority])(implicit random: Random = Random)
   extends WeightedItemsSelector(priorities.map(p => (p.weight.toDouble, p.value)))
 
-case class QueueDefinition(name: String, callback: QueueTask.Callback, taskContext: TaskContext = new TaskContext,
+case class QueueDefinition(name: String, callback: QueueCallback, taskContext: TaskContext = new TaskContext,
                            priorities: Iterable[Priority] = Seq(Priority(1, weight = 1)),
                            maxRetryCount: Option[Int] = None)
 
@@ -89,9 +89,12 @@ trait QueueFactory {
   def createQueue(token: Long, definition: QueueDefinition, service: Service): Queue
 }
 
-object QueueTask {
-  type Data = Any
-  type Callback = (Data) => Future[Result]
+trait QueueCallback {
+  def execute(data: Any): Future[QueueCallback.Result]
+}
+
+object QueueCallback {
+  //  case class Task(data: Any)
 
   sealed trait Result
 
@@ -102,5 +105,4 @@ object QueueTask {
     case class Fail(error: Exception, ignore: Boolean = false) extends Result
 
   }
-
 }

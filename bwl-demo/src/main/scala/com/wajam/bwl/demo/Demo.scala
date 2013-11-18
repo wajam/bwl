@@ -48,7 +48,7 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
 
   val (scnService, scnClient) = createScnServiceAndClient()
 
-  val queueDefinitions = List(QueueDefinition("single", new DemoResource.Callback("single")))
+  val queueDefinitions = List(QueueDefinition("single", new DemoResource.DemoCallback("single")))
 
   val bwlService = createBwlService(queueDefinitions)
 

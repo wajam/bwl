@@ -9,7 +9,6 @@ import com.wajam.nrv.cluster.LocalNode
 import java.nio.file.Files
 import org.apache.commons.io.FileUtils
 import com.wajam.bwl.queue._
-import scala.concurrent.Future
 import org.scalatest.mock.MockitoSugar
 import com.wajam.nrv.consistency.ConsistencyOne
 import org.scalatest.matchers.ShouldMatchers._
@@ -39,7 +38,7 @@ class TestLogQueue extends FlatSpec {
     }
     val priorities = List(Priority(1, weight = 66), Priority(2, weight = 33))
 
-    val definition: QueueDefinition = QueueDefinition("name", (_) => mock[Future[QueueTask.Result]], priorities = priorities)
+    val definition: QueueDefinition = QueueDefinition("name", mock[QueueCallback], priorities = priorities)
 
     val resource = new QueueResource((_, _) => None, (_) => definition, (_) => member)
     resource.registerTo(service)

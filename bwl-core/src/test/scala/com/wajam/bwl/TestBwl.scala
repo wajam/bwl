@@ -25,7 +25,7 @@ class TestBwl extends FunSuite {
         import ExecutionContext.Implicits.global
 
         f.bwl.enqueue(0, f.definitions.head.name, "hello")
-        verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
+        verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))
         verifyNoMoreInteractions(f.mockCallback)
       })
     }
@@ -46,7 +46,7 @@ class TestBwl extends FunSuite {
         Await.result(Future.sequence(enqueued), 5.seconds)
 
         val dataCaptor = ArgumentCaptor.forClass(classOf[Map[String, Any]])
-        verify(f.mockCallback, timeout(5000).atLeast(100)).process(dataCaptor.capture())
+        verify(f.mockCallback, timeout(5000).atLeast(100)).execute(dataCaptor.capture())
 
         val values = dataCaptor.getAllValues.toList.take(100)
         val p1Count = values.map(_("p")).count(_ == 1)
@@ -71,7 +71,7 @@ class TestBwl extends FunSuite {
       import ExecutionContext.Implicits.global
 
       f.bwl.enqueue(0, f.definitions.head.name, "hello")
-      verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
+      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))
 
       val spyQueue = spyQueueFactory.allQueues.head
       val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -92,7 +92,7 @@ class TestBwl extends FunSuite {
       import ExecutionContext.Implicits.global
 
       f.bwl.enqueue(0, f.definitions.head.name, "hello")
-      verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
+      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))
 
       val spyQueue = spyQueueFactory.allQueues.head
       val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -114,7 +114,7 @@ class TestBwl extends FunSuite {
       import ExecutionContext.Implicits.global
 
       f.bwl.enqueue(0, f.definitions.head.name, "hello")
-      verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
+      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))
 
       val spyQueue = spyQueueFactory.allQueues.head
       val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -137,7 +137,7 @@ class TestBwl extends FunSuite {
       f.bwl.applySupport(responseTimeout = Some(200L))
 
       f.bwl.enqueue(0, f.definitions.head.name, "hello")
-      verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
+      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))
 
       val spyQueue = spyQueueFactory.allQueues.head
       val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -162,7 +162,7 @@ class TestBwl extends FunSuite {
       f.bwl.applySupport(responseTimeout = Some(200L))
 
       f.bwl.enqueue(0, f.definitions.head.name, "hello")
-      verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
+      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))
 
       val spyQueue = spyQueueFactory.allQueues.head
       val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -193,10 +193,8 @@ class TestBwl extends FunSuite {
 
       f.bwl.enqueue(0, f.definitions.head.name, "hello")
 
-      // Would retry forever but we stop waiting at 5
-      waitForCondition() {
-        f.callbackCallCount > 5
-      }
+      // SPNL would retry forever but we stop waiting after the fifth callback invocation
+      verify(f.mockCallback, timeout(2000).atLeast(5)).execute(ArgumentCaptor.forClass(classOf[String]).capture())
 
       val spyQueue = spyQueueFactory.allQueues.head
       val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -204,6 +202,7 @@ class TestBwl extends FunSuite {
       verify(spyQueue).enqueue(taskCaptor.capture())
       taskCaptor.getAllValues.size() should be(1)
 
+      // Ensure the task is never acknowledged
       verify(spyQueue, never()).ack(ackCaptor.capture())
       ackCaptor.getAllValues.size() should be(0)
     })
@@ -227,18 +226,16 @@ class TestBwl extends FunSuite {
       import ExecutionContext.Implicits.global
 
       f.bwl.enqueue(0, f.definitions.head.name, "hello")
-      verify(f.mockCallback, timeout(2000)).process(argEquals("hello"))
+      verify(f.mockCallback, timeout(2000).times(1 + maxRetryCount)).execute(argEquals("hello"))
 
       val spyQueue = spyQueueFactory.allQueues.head
       val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
       val ackCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Ack])
-      verify(spyQueue, timeout(2000)).enqueue(taskCaptor.capture())
+      verify(spyQueue).enqueue(taskCaptor.capture())
       taskCaptor.getAllValues.size() should be(1)
 
       verify(spyQueue, timeout(2000)).ack(ackCaptor.capture())
       ackCaptor.getAllValues.size() should be(1)
-
-      f.callbackCallCount should be(1 + maxRetryCount)
     })
   }
 
