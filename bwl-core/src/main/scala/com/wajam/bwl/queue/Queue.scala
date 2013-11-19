@@ -24,7 +24,7 @@ sealed trait QueueItem {
   def token: Long
   def priority: Int
   def name: String
-  def enqueueTime: Long = (itemId.value - itemId.value % 10000) / 10000
+  def createTime: Long = (itemId.value - itemId.value % 10000) / 10000
 }
 
 object QueueItem {
