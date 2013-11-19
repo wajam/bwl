@@ -46,6 +46,16 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
 
   protected def definitionFor(queueName: String): QueueDefinition = definitionsMap(queueName)
 
+  def queueViews(serviceName: String): Iterable[QueueView] = queues.valuesIterator.map { wrapper =>
+    new QueueView {
+      def name = wrapper.queue.name
+
+      def priorities = wrapper.queue.priorities
+
+      def stats = wrapper.queue.stats
+    }
+  }.toIterable
+
   /**
    * Enqueue the specified task data and returns the task id if enqueued successfully .
    */
@@ -78,7 +88,7 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
     val persistence = taskPersistenceFactory.createServiceMemberPersistence(this, member)
 
     // TODO: allow per queue timeout???
-    val taskAction = new TaskAction(s"${serviceName}_${definition.name}", queueCallbackAdapter(definition), responseTimeout)
+    val taskAction = new TaskAction(s"${serviceName}_${definition.name}_${member.token}", queueCallbackAdapter(definition), responseTimeout)
     val task = new Task(queue.feeder, taskAction, persistence, queue.definition.taskContext, random)
 
     QueueWrapper(queue, task)

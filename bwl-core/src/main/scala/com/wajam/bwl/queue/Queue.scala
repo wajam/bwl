@@ -62,6 +62,15 @@ trait QueueStats {
   def delayedTasks: Iterable[QueueItem.Task]
 }
 
+trait QueueView {
+
+  def name: String
+
+  def priorities: Iterable[Priority]
+
+  def stats: QueueStats
+}
+
 trait Queue {
 
   def token: Long

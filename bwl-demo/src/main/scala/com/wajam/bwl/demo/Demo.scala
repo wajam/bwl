@@ -8,7 +8,7 @@ import com.wajam.nrv.extension.resource._
 import com.wajam.nrv.protocol.codec.StringCodec
 import com.wajam.spnl._
 import com.wajam.bwl.{ ConsistentBwl, Bwl }
-import com.wajam.bwl.queue.QueueDefinition
+import com.wajam.bwl.queue.{ Priority, QueueDefinition }
 import com.wajam.bwl.queue.log.LogQueue
 import java.io.File
 import com.wajam.nrv.service.{ Switchboard, ExplicitReplicaResolver, ActionSupportOptions, Service }
@@ -21,10 +21,12 @@ import com.wajam.scn.client.{ ScnClientConfig, ScnClient }
 import com.wajam.scn.{ Scn, ScnConfig }
 import com.wajam.scn.storage.StorageType
 import java.nio.file.Files
+import com.wajam.nrv.extension.json.codec.JsonCodec
+import java.util.concurrent.Executors
 
 object Demo extends App with Logging {
 
-  import scala.concurrent.ExecutionContext.Implicits.global
+  implicit private val executionContext = ExecutionContext.fromExecutorService(Executors.newCachedThreadPool())
 
   PropertyConfigurator.configureAndWatch("etc/log4j.properties", 5000)
   log.info("Initializing Bwl movement")
@@ -48,7 +50,10 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
 
   val (scnService, scnClient) = createScnServiceAndClient()
 
-  val queueDefinitions = List(QueueDefinition("single", new DemoResource.DemoCallback("single")))
+  val queueDefinitions = List(
+    QueueDefinition("single", new DemoResource.DemoCallback("single", delay = 0L)),
+    QueueDefinition("multiple", new DemoResource.DemoCallback("multiple", delay = 0L),
+      priorities = Seq(Priority(1, weight = 3), Priority(2, weight = 1))))
 
   val bwlService = createBwlService(queueDefinitions)
 
@@ -113,6 +118,7 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
       config.getProtocolHttpConnectionTimeoutMs,
       config.getProtocolHttpConnectionPoolMaxSize)
     httpProtocol.registerCodec("text/plain", new StringCodec)
+    httpProtocol.registerCodec("application/json", new JsonCodec)
     httpProtocol
   }
 
@@ -126,7 +132,7 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
     (service, new ScnClient(service, ScnClientConfig()))
   }
 
-  private def createBwlService(definitions: Iterable[QueueDefinition]): Bwl = {
+  private def createBwlService(definitions: Iterable[QueueDefinition]): Bwl with DemoBwlService = {
 
     val spnlPersistenceFactory = config.getClusterManager match {
       case "zookeeper" => new ZookeeperTaskPersistenceFactory(zkClient)
@@ -138,7 +144,11 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
       config.getBwlPersistentQueueCommitFrequency,
       config.getBwlPersistentQueueCleanFrequency)
 
-    val service = new Bwl("bwl", definitions, queueFactory, new Spnl(), spnlPersistenceFactory) with ConsistentBwl
+    val bwlSpnl = new Spnl()
+    val service = new Bwl("bwl", definitions, queueFactory, bwlSpnl, spnlPersistenceFactory) with ConsistentBwl with DemoBwlService {
+      val spnl: Spnl = bwlSpnl
+    }
+    service.applySupport(responseTimeout = Some(config.getBwlTaskTimeout))
 
     if (config.getBwlConsistencyReplicationEnabled) {
       val consistencyLogDirectory = new File(config.getBwlConsistencyLogDirectory)
@@ -157,16 +167,23 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
         config.getBwlConsistencyLogDirectory,
         txLogEnabled = true,
         replicationResolver = Some(new ExplicitReplicaResolver(config.getBwlConsistencyExplicitReplicas, service.resolver)))
-      service.applySupport(consistency = Some(consistency), responseTimeout = Some(config.getBwlTaskTimeout))
+      service.applySupport(consistency = Some(consistency))
     }
 
     service
   }
 
   private def createDemoService(): Service = {
-    val service = new Service("demo")
+    val service = new Service("demo") /*with CrtxBwlApi with CrtxNrvAPI with CrtxSpnlAPI with CrtxNrvConsistencyAPI*/ {
+      protected val spnl = bwlService.spnl
+      protected def queueViews(serviceName: String) = bwlService.queueViews(serviceName)
+    }
     val demoResource = new DemoResource(bwlService, queueDefinitions)
     service.registerResources(demoResource)
     service
+  }
+
+  trait DemoBwlService {
+    def spnl: Spnl
   }
 }

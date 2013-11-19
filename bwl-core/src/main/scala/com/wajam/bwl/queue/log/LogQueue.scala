@@ -100,9 +100,7 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
         recorder.appendMessage(createSyntheticSuccessResponse(request))
         lastItemId.update(Some(ackItem.itemId))
 
-        if (feeder.isPending(ackItem.taskId)) {
-          totalTaskCount.decrementAndGet()
-        }
+        totalTaskCount.decrementAndGet()
 
         cleaners(ackItem.priority).tick()
       }
