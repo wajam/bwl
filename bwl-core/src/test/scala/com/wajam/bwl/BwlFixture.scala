@@ -13,8 +13,12 @@ import java.nio.file.Files
 import com.wajam.bwl.queue.log.LogQueue
 import org.apache.commons.io.FileUtils
 import org.mockito.Mockito._
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ Future, ExecutionContext }
 import com.wajam.bwl.BwlFixture.FixtureQueueFactory
+import org.mockito.Matchers._
+import com.wajam.bwl.queue.QueueDefinition
+import org.mockito.stubbing.Answer
+import org.mockito.invocation.InvocationOnMock
 
 trait BwlFixture extends CallbackFixture with MockitoSugar {
 
@@ -140,51 +144,36 @@ object BwlFixture {
 
 trait CallbackFixture extends MockitoSugar {
 
-  trait MockableCallback {
-    def process(data: QueueTask.Data)
+  val mockCallback: QueueCallback = mock[QueueCallback]
+
+  class QueueCallbackAnswer(delay: Long, result: QueueCallback.Result) extends Answer[Future[QueueCallback.Result]] {
+
+    import scala.concurrent.future
+    import ExecutionContext.Implicits.global
+
+    def answer(iom: InvocationOnMock) = future {
+      Thread.sleep(delay)
+      result
+    }
   }
 
-  val mockCallback: MockableCallback = mock[MockableCallback]
-
-  @volatile
-  var callbackCallCount: Int = 0
-
-  def taskCallback: QueueTask.Callback
 }
 
 abstract class OkCallbackFixture(delay: Long = 0L) extends CallbackFixture {
-
-  import scala.concurrent.future
-  import ExecutionContext.Implicits.global
-
-  def taskCallback = (data) =>
-    future {
-      callbackCallCount += 1
-      Thread.sleep(delay)
-      mockCallback.process(data)
-      QueueTask.Result.Ok
-    }
+  when(mockCallback.execute(anyObject())).thenAnswer(new QueueCallbackAnswer(delay, QueueCallback.Result.Ok))
 }
 
 abstract class FailCallbackFixture(ignore: Boolean = false, delay: Long = 0L) extends CallbackFixture {
   this: BwlFixture =>
 
-  import scala.concurrent.future
-  import ExecutionContext.Implicits.global
-
-  def taskCallback = (data) =>
-    future {
-      callbackCallCount += 1
-      Thread.sleep(delay)
-      mockCallback.process(data)
-      QueueTask.Result.Fail(new Exception(), ignore)
-    }
+  when(mockCallback.execute(anyObject())).thenAnswer(
+    new QueueCallbackAnswer(delay, QueueCallback.Result.Fail(new Exception(), ignore)))
 }
 
 trait SinglePriorityQueueFixture {
   this: BwlFixture with CallbackFixture =>
 
-  lazy val singlePriorityDefinition = QueueDefinition("single", taskCallback, newTaskContext)
+  lazy val singlePriorityDefinition = QueueDefinition("single", mockCallback, newTaskContext)
 
   def definitions = List(singlePriorityDefinition)
 }
@@ -192,7 +181,7 @@ trait SinglePriorityQueueFixture {
 trait MultiplePriorityQueueFixture {
   this: BwlFixture with CallbackFixture =>
 
-  lazy val multiplePriorityDefinition = QueueDefinition("multiple", taskCallback, newTaskContext,
+  lazy val multiplePriorityDefinition = QueueDefinition("multiple", mockCallback, newTaskContext,
     priorities = List(Priority(1, weight = 66), Priority(2, weight = 33)))
 
   def definitions = List(multiplePriorityDefinition)

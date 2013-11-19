@@ -89,7 +89,6 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
   private def callbackTimeout = math.max(responseTimeout * 0.75, responseTimeout - 500)
 
   private def queueCallbackAdapter(definition: QueueDefinition)(request: SpnlRequest) {
-    import QueueTask.Result
     import QueueResource._
 
     implicit val sameThreadExecutionContext = new ExecutionContext {
@@ -131,17 +130,17 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
         }
       }
 
-      val response = definition.callback(data.values("data"))
+      val response = definition.callback.execute(data.values("data"))
       response.onSuccess {
-        case Result.Ok => executeIfCallbackNotExpired {
+        case QueueCallback.Result.Ok => executeIfCallbackNotExpired {
           ack(taskToken, definition.name, taskId, priority)
           request.ok()
         }
-        case Result.Fail(error, ignore) if ignore => executeIfCallbackNotExpired {
+        case QueueCallback.Result.Fail(error, ignore) if ignore => executeIfCallbackNotExpired {
           ack(taskToken, definition.name, taskId, priority)
           request.ignore(error)
         }
-        case Result.Fail(error, ignore) => executeIfCallbackNotExpired {
+        case QueueCallback.Result.Fail(error, ignore) => executeIfCallbackNotExpired {
           request.fail(error)
         }
       }
