@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import scala.util.Random
 import scala.annotation.tailrec
 import com.wajam.nrv.consistency.log.LogRecord.Index
-import com.wajam.commons.{ Closable, Logging }
+import com.wajam.commons.{ Closable, Logging, CurrentTime }
 import LogQueue._
 import com.wajam.bwl.utils.PeekIterator
 import scala.concurrent.ExecutionContext
@@ -27,7 +27,7 @@ import java.util.concurrent.{ TimeUnit, Executors }
  * Persistent queue using NRV transaction log as backing storage. Each priority is appended to separate log.
  */
 class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory: RecorderFactory,
-               logCleanFrequencyInMs: Long, truncateTracker: TruncateTracker)(implicit random: Random = Random)
+               logCleanFrequencyInMs: Long, truncateTracker: TruncateTracker)(implicit random: Random = Random, clock: CurrentTime = new CurrentTime {})
     extends ConsistentQueue with Logging {
 
   private val recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
@@ -233,7 +233,7 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
       PriorityTaskItemReader(itr, processed)
     }
 
-    new DelayedPriorityTaskItemReader(recorder, createLogTaskReader)
+    new LazyPriorityTaskItemReader(recorder, createLogTaskReader)
   }
 
   /**
@@ -426,7 +426,7 @@ object LogQueue {
   type RecorderFactory = (Long, QueueDefinition, Priority) => TransactionRecorder
 
   class Factory(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000,
-                logCleanFrequencyInMs: Long = 3600000L)(implicit random: Random = Random) extends QueueFactory {
+                logCleanFrequencyInMs: Long = 3600000L)(implicit random: Random = Random, clock: CurrentTime = new CurrentTime {}) extends QueueFactory {
     def createQueue(token: Long, definition: QueueDefinition, service: Service) = {
       Logger.debug(s"Create log queue '$token:${definition.name}'")
 
@@ -486,7 +486,7 @@ object LogQueue {
     message.function match {
       case MessageType.FUNCTION_CALL if message.path == "/enqueue" => {
         message.timestamp.map(QueueItem.Task(message.param[String](QueueName), message.token,
-          message.param[Int](TaskPriority), _, message.getData[Any]))
+          message.param[Int](TaskPriority), _, message.getData[Any], message.optionalParam[Long](TaskScheduleTime)))
       }
       case MessageType.FUNCTION_CALL if message.path == "/ack" => {
         message.timestamp.map(QueueItem.Ack(message.param[String](QueueName), message.token,
@@ -499,19 +499,22 @@ object LogQueue {
   private[log] def item2request(item: QueueItem): InMessage = {
     item match {
       case taskItem: QueueItem.Task => {
-        createSyntheticRequest(taskItem.taskId, taskItem.taskId, taskItem, "/enqueue", taskItem.data)
+        createSyntheticRequest(taskItem.taskId, taskItem, "/enqueue", taskItem.data, taskItem.scheduleTime)
       }
-      case ackItem: QueueItem.Ack => createSyntheticRequest(ackItem.ackId, ackItem.taskId, ackItem, "/ack")
+      case ackItem: QueueItem.Ack => createSyntheticRequest(ackItem.taskId, ackItem, "/ack")
     }
   }
 
-  private[log] def createSyntheticRequest(itemId: Timestamp, taskId: Timestamp, item: QueueItem, path: String,
-                                          data: Any = null): InMessage = {
+  private[log] def createSyntheticRequest(taskId: Timestamp,
+                                          item: QueueItem,
+                                          path: String,
+                                          data: Any = null,
+                                          scheduleTime: Option[Long] = None): InMessage = {
     val params = Iterable[(String, MValue)](QueueName -> item.name, TaskId -> taskId.value, TaskToken -> item.token,
-      TaskPriority -> item.priority)
+      TaskPriority -> item.priority) ++ scheduleTime.map(t => TaskScheduleTime -> MLong(t))
     val request = new InMessage(params, data = data)
     request.token = item.token
-    request.timestamp = Some(itemId)
+    request.timestamp = Some(item.itemId)
     request.function = MessageType.FUNCTION_CALL
     request.path = path
     request

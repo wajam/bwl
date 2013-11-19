@@ -8,12 +8,7 @@ import com.wajam.commons.Closable
 /**
  * Readers which returns unprocessed tasks
  */
-trait PriorityTaskItemReader extends Iterator[Option[QueueItem.Task]] with Closable {
-  /**
-   * Returns delayed task items ordered from the oldest to the newest tasks
-   */
-  def delayedTasks: Iterable[QueueItem.Task]
-}
+trait PriorityTaskItemReader extends Iterator[Option[QueueItem.Task]] with Closable
 
 object PriorityTaskItemReader {
   /**
