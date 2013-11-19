@@ -46,13 +46,13 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
 
   protected def definitionFor(queueName: String): QueueDefinition = definitionsMap(queueName)
 
-  def queueViews(serviceName: String): Iterable[QueueView] = queues.valuesIterator.map {
-    case QueueWrapper(queue, _) => new QueueView {
-      def name = queue.name
+  def queueViews(serviceName: String): Iterable[QueueView] = queues.valuesIterator.map { wrapper =>
+    new QueueView {
+      def name = wrapper.queue.name
 
-      def priorities = queue.priorities
+      def priorities = wrapper.queue.priorities
 
-      def stats = queue.stats
+      def stats = wrapper.queue.stats
     }
   }.toIterable
 
