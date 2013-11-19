@@ -82,4 +82,5 @@ object QueueResource {
   val TaskToken = "token"
   val TaskId = "id"
   val TaskPriority = "priority"
+  val TaskScheduleTime = "scheduletime"
 }

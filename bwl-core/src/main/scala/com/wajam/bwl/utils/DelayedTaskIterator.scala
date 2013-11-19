@@ -9,35 +9,35 @@ import com.wajam.bwl.queue.QueueItem
  * Iterator that wraps an iterator of Tasks and returns tasks with respect to delayed ones.
  * The wrapped iterator should not return null values, and it should not be used outside.
  */
-class DelayedTaskIterator(itr: Iterator[Option[QueueItem.Task]], time: CurrentTime) extends Iterator[Option[QueueItem.Task]] {
-  // Tasks are indexed with a tuple of (executeAfter, taskId) to ensure both uniqueness and ordering
+class DelayedTaskIterator(itr: Iterator[Option[QueueItem.Task]], clock: CurrentTime) extends Iterator[Option[QueueItem.Task]] {
+  // Tasks are indexed with a tuple of (scheduleTime, taskId) to ensure both uniqueness and ordering
   private var _delayedTasks: Map[(Long, Timestamp), QueueItem.Task] = TreeMap()
 
-  def delayedTasks = _delayedTasks
+  def delayedTasks = _delayedTasks.valuesIterator
 
-  private def isPast(dateTime: Long): Boolean = time.currentTime >= dateTime
+  private def isReady(scheduleTime: Long): Boolean = clock.currentTime >= scheduleTime
 
   def hasNext = itr.hasNext || _delayedTasks.nonEmpty
 
   def next(): Option[QueueItem.Task] = {
     _delayedTasks.headOption match {
-      case Some(((executeAfter, taskId), task)) if isPast(executeAfter) =>
+      case Some(((scheduleTime, taskId), task)) if isReady(scheduleTime) =>
         // The most urgent delayed task is ready: return it
-        _delayedTasks -= ((executeAfter, taskId))
+        _delayedTasks -= ((scheduleTime, taskId))
         Some(task)
       case _ if itr.hasNext =>
         // No delayed task ready to be returned: get next from wrapped iterator
         itr.next().flatMap { task =>
-          task.executeAfter match {
+          task.scheduleTime match {
             case None =>
               // Task is not delayed: return it
               Some(task)
-            case Some(executeAfter) if isPast(executeAfter) =>
+            case Some(scheduleTime) if isReady(scheduleTime) =>
               // Task is delayed but ready to be executed: return it
               Some(task)
-            case Some(executeAfter) =>
+            case Some(scheduleTime) =>
               // Task is delayed: save it and go to next
-              _delayedTasks += (executeAfter, task.taskId) -> task
+              _delayedTasks += (scheduleTime, task.taskId) -> task
               next()
           }
         }

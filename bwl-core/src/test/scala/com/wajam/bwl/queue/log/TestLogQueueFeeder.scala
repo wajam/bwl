@@ -14,13 +14,14 @@ import com.wajam.nrv.utils.timestamp.Timestamp
 import org.mockito.stubbing.Answer
 import org.mockito.invocation.InvocationOnMock
 import scala.util.Random
+import com.wajam.commons.ControlableCurrentTime
 
 @RunWith(classOf[JUnitRunner])
 class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
 
-  private def task(id: Long, priority: Int = 1): QueueItem.Task = QueueItem.Task("name", id, priority, id, data = id)
+  private def task(id: Long, priority: Int = 1, scheduleTime: Option[Long] = None): QueueItem.Task = QueueItem.Task("name", id, priority, id, data = id, scheduleTime = scheduleTime)
 
-  private def someTask(id: Long, priority: Int = 1): Option[QueueItem.Task] = Some(task(id, priority))
+  private def someTask(id: Long, priority: Int = 1, scheduleTime: Option[Long] = None): Option[QueueItem.Task] = Some(task(id, priority, scheduleTime))
 
   private def feederData(id: Long, priority: Int = 1): FeederData = task(id, priority).toFeederData
 
@@ -35,7 +36,6 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
     val mockReader = mock[PriorityTaskItemReader]
     when(mockReader.hasNext).thenReturn(true)
     when(mockReader.next()).thenReturn(someTask(1L), None, someTask(2L), someTask(3L), None)
-    when(mockReader.delayedTasks).thenReturn(Nil)
     val feeder = new LogQueueFeeder(QueueDefinition("name", mock[QueueCallback]), (_, _) => mockReader)
     val context = TaskContext()
     feeder.init(context)
@@ -71,12 +71,53 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
     feeder.oldestTaskIdFor(1) should be(Some(Timestamp(3L)))
   }
 
+  it should "respect order of delayed tasks and update context data accordingly" in {
+    implicit val timer = new ControlableCurrentTime {}
+    val delay = 10000L
+    val scheduleTime = timer.currentTime + delay
+
+    val mockReader = mock[PriorityTaskItemReader]
+    when(mockReader.hasNext).thenReturn(true)
+    when(mockReader.next()).thenReturn(someTask(1L), None, someTask(2L, scheduleTime = Some(scheduleTime)), someTask(3L), None)
+    val feeder = new LogQueueFeeder(QueueDefinition("name", mock[QueueCallback]), (_, _) => mockReader)
+    val context = TaskContext()
+    feeder.init(context)
+
+    // Fetch non-delayed tasks
+    feeder.take(6).toList should be(List(someFeederData(1L), None, someFeederData(3L), None, None, None))
+    feeder.pendingTasks.toList should be(List(task(1L), task(3L)))
+    feeder.isPending(1L) should be(true)
+
+    // Ack non-delayed tasks
+    feeder.ack(feederData(1L))
+    feeder.ack(feederData(3L))
+    feeder.pendingTasks.toList should be(Nil)
+
+    context.data("1") should be(2L)
+    feeder.oldestTaskIdFor(1) should be(Some(Timestamp(2L)))
+
+    timer.advanceTime(delay)
+
+    // Fetch the delayed task
+    feeder.take(2).toList should be(List(None, someFeederData(2L)))
+    feeder.pendingTasks.toList should be(List(task(2L, scheduleTime = Some(scheduleTime))))
+    feeder.isPending(2L) should be(true)
+
+    // Ack the delayed task
+    feeder.ack(feederData(2L))
+    feeder.pendingTasks.toList should be(Nil)
+
+    context.data("1") should be(3L)
+    feeder.oldestTaskIdFor(1) should be(Some(Timestamp(3L)))
+  }
+
   it should "start at context position" in {
 
     val expectedStartTimestamp: Timestamp = 5L
     var actualStartTimestamp: Option[Timestamp] = None
 
     val mockReader = mock[PriorityTaskItemReader]
+    when(mockReader.next()).thenReturn(None)
     def createReader(priority: Int, startTimestamp: Option[Timestamp]): PriorityTaskItemReader = {
       actualStartTimestamp = startTimestamp
       mockReader
@@ -123,27 +164,5 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
 
     answers(1).callsCount should be(63)
     answers(2).callsCount should be(37)
-  }
-
-  it should "returns expected delayed tasks" in {
-    val priorities = List(Priority(1, 1), Priority(2, 2))
-    val priority1DelayedTasks = List(task(id = 1, priority = 1), task(id = 3, priority = 1))
-    val priority2DelayedTasks = List(task(id = 2, priority = 2))
-
-    val mockReader1 = mock[PriorityTaskItemReader]
-    when(mockReader1.delayedTasks).thenReturn(priority1DelayedTasks)
-    val mockReader2 = mock[PriorityTaskItemReader]
-    when(mockReader2.delayedTasks).thenReturn(priority2DelayedTasks)
-
-    def createReader(priority: Int, startTimestamp: Option[Timestamp]): PriorityTaskItemReader = priority match {
-      case 1 => mockReader1
-      case 2 => mockReader2
-    }
-
-    val feeder = new LogQueueFeeder(QueueDefinition("name", mock[QueueCallback], priorities = priorities), createReader)
-    val context = TaskContext()
-    feeder.init(context)
-
-    feeder.delayedTasks.toList should be(priority1DelayedTasks ++ priority2DelayedTasks)
   }
 }
