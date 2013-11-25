@@ -7,6 +7,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Random
 import com.wajam.commons.{ CurrentTime, Logging }
 import scala.concurrent.ExecutionContext
+import com.wajam.bwl.utils.LogCleanerMetrics
 
 /**
  * Job to clean up transaction log older than the specified `oldestTimestamp`. The job is never triggered more than
@@ -15,7 +16,8 @@ import scala.concurrent.ExecutionContext
  * method.
  */
 class LogCleaner(txLog: FileTransactionLog, oldestTimestamp: => Option[Timestamp],
-                 cleanFrequencyInMs: Long)(implicit ec: ExecutionContext, random: Random = Random) extends CurrentTime with Logging {
+                 cleanFrequencyInMs: Long)(implicit ec: ExecutionContext, metrics: LogCleanerMetrics, random: Random = Random) extends CurrentTime with Logging {
+  import metrics._
 
   @volatile
   private var nextCleanupTime: Long = currentTime + cleanFrequencyInMs / 2 +
@@ -77,6 +79,7 @@ class LogCleaner(txLog: FileTransactionLog, oldestTimestamp: => Option[Timestamp
       maxCleanupFile <- txLog.guessLogFile(timestamp).toList
       file <- txLog.getLogFiles.takeWhile(_.getCanonicalPath < maxCleanupFile.getCanonicalPath)
     } yield file
+    instrument { cleanupFileCounter += filesToDelete.size }
     filesToDelete.foreach(_.delete())
     filesToDelete
   }

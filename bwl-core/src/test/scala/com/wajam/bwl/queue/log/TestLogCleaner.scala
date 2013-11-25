@@ -15,11 +15,14 @@ import scala.util.Random
 import com.wajam.commons.ControlableCurrentTime
 import com.wajam.spnl.feeder.Feeder
 import scala.concurrent.ExecutionContext
+import com.wajam.bwl.utils.{ LogCleanerMetrics, DisabledMetrics }
 
 @RunWith(classOf[JUnitRunner])
 class TestLogCleaner extends FlatSpec {
 
   trait FileLog {
+    implicit val metrics = new LogCleanerMetrics with DisabledMetrics
+
     def withTransactionLog(test: FileTransactionLog => Any) {
       val logDir: File = Files.createTempDirectory("TestLogCleaner").toFile
       val fileRolloverSize = 50 // Use a very small roll size to force file roll between each log record

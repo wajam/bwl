@@ -53,7 +53,7 @@ class TestLogQueue extends FlatSpec {
       try {
 
         def createQueue: LogQueue = {
-          val queue = factory.createQueue(token = 0, definition, service)
+          val queue = factory.createQueue(token = 0, definition, service, instrumented = false)
           queues = queue :: queues
           queue.start()
           queue.feeder.init(definition.taskContext)

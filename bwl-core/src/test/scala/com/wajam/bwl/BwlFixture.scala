@@ -132,8 +132,8 @@ object BwlFixture {
     override def after() = queueFactory.after()
 
     def factory = new QueueFactory {
-      def createQueue(token: Long, definition: QueueDefinition, service: Service) = {
-        val queue = queueFactory.factory.createQueue(token, definition, service)
+      def createQueue(token: Long, definition: QueueDefinition, service: Service, instrumented: Boolean = false) = {
+        val queue = queueFactory.factory.createQueue(token, definition, service, instrumented)
         spyQueues = spy[Queue](queue) :: spyQueues
         spyQueues.head
       }

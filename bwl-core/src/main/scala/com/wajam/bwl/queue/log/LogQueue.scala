@@ -19,7 +19,7 @@ import scala.annotation.tailrec
 import com.wajam.nrv.consistency.log.LogRecord.Index
 import com.wajam.commons.{ Closable, Logging, CurrentTime }
 import LogQueue._
-import com.wajam.bwl.utils.PeekIterator
+import com.wajam.bwl.utils.{ PeekIterator, LogQueueMetrics, DisabledMetrics }
 import scala.concurrent.ExecutionContext
 import java.util.concurrent.{ TimeUnit, Executors }
 
@@ -27,8 +27,10 @@ import java.util.concurrent.{ TimeUnit, Executors }
  * Persistent queue using NRV transaction log as backing storage. Each priority is appended to separate log.
  */
 class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory: RecorderFactory,
-               logCleanFrequencyInMs: Long, truncateTracker: TruncateTracker)(implicit random: Random = Random, clock: CurrentTime = new CurrentTime {})
-    extends ConsistentQueue with Logging {
+               logCleanFrequencyInMs: Long, val truncateTracker: TruncateTracker)(implicit random: Random = Random, clock: CurrentTime = new CurrentTime {})
+    extends ConsistentQueue with Logging with LogQueueMetrics {
+
+  implicit val queueMetrics = this
 
   private val recorders: Map[Int, TransactionRecorder] = priorities.map(p => p.value -> recorderFactory(token, definition, p)).toMap
 
@@ -73,7 +75,9 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
     }
 
     recorders.get(taskItem.priority) match {
-      case Some(recorder) => {
+      case Some(recorder) =>
+        instrument { enqueuesMeter.mark() }
+
         val request = item2request(taskItem)
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
@@ -83,9 +87,10 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
         if (taskItem.taskId > getOrInitializeRebuildEndPosition) {
           totalTaskCount.incrementAndGet()
         }
+      case None =>
+        instrument { enqueueErrorsMeter.mark() }
 
-      }
-      case None => throw new IllegalArgumentException(s"Queue '$token:$name' unknown priority ${taskItem.priority}")
+        throw new IllegalArgumentException(s"Queue '$token:$name' unknown priority ${taskItem.priority}")
     }
     taskItem
   }
@@ -94,7 +99,9 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
     requireStarted()
 
     recorders.get(ackItem.priority) match {
-      case Some(recorder) => {
+      case Some(recorder) =>
+        instrument { acksMeter.mark() }
+
         val request = item2request(ackItem)
         recorder.appendMessage(request)
         recorder.appendMessage(createSyntheticSuccessResponse(request))
@@ -103,8 +110,10 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
         totalTaskCount.decrementAndGet()
 
         cleaners(ackItem.priority).tick()
-      }
-      case None => throw new IllegalArgumentException(s"Queue '$token:$name' unknown priority ${ackItem.priority}")
+      case None =>
+        instrument { ackErrorsMeter.mark() }
+
+        throw new IllegalArgumentException(s"Queue '$token:$name' unknown priority ${ackItem.priority}")
     }
     ackItem
   }
@@ -243,6 +252,7 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
 
     import com.wajam.commons.Closable.using
 
+    val startTime = clock.currentTime
     debug(s"Rebuilding queue state '$token:$name#$priority' starting at $startTimestamp")
 
     val recorder = recorders(priority)
@@ -284,6 +294,12 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
       val (all, processed) = processNext(Set(), Set())
 
       debug(s"Rebuilding queue state '$token:$name#$priority' completed (all=${all.size}, processed=${processed.size}})")
+
+      instrument {
+        rebuildActiveTasksCounter += all.size
+        rebuildSkippedTasksCounter += processed.size
+        rebuildTimer.update(startTime - clock.currentTime, TimeUnit.MILLISECONDS)
+      }
 
       (all.size, processed)
     }
@@ -425,7 +441,7 @@ object LogQueue {
 
   class Factory(dataDir: File, logFileRolloverSize: Int = 52428800, logCommitFrequency: Int = 2000,
                 logCleanFrequencyInMs: Long = 3600000L)(implicit random: Random = Random, clock: CurrentTime = new CurrentTime {}) extends QueueFactory {
-    def createQueue(token: Long, definition: QueueDefinition, service: Service) = {
+    def createQueue(token: Long, definition: QueueDefinition, service: Service, instrumented: Boolean = true) = {
       Logger.debug(s"Create log queue '$token:${definition.name}'")
 
       val logDir = Paths.get(dataDir.getCanonicalPath, service.name, "queues")
@@ -474,7 +490,8 @@ object LogQueue {
         new TransactionRecorder(memberFor(priority), txLogFor(priority), consistencyDelay, service.responseTimeout, logCommitFrequency, {})
       }
 
-      new LogQueue(token, definition, recorderFactory, logCleanFrequencyInMs, truncateTracker)
+      if (instrumented) new LogQueue(token, definition, recorderFactory, logCleanFrequencyInMs, truncateTracker)
+      else new LogQueue(token, definition, recorderFactory, logCleanFrequencyInMs, truncateTracker) with DisabledMetrics
     }
   }
 
