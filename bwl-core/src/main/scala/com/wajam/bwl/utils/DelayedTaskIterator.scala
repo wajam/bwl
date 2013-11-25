@@ -33,7 +33,7 @@ class DelayedTaskIterator(itr: Iterator[Option[QueueItem.Task]], clock: CurrentT
         itr.next().flatMap { task =>
           instrument {
             dequeuesMeters(task.priority).mark()
-            taskWaitTimer.update(clock.currentTime - task.createTime, TimeUnit.MICROSECONDS)
+            taskWaitTimer.update(clock.currentTime - task.createTime, TIMER_UNIT)
           }
           task.scheduleTime match {
             case None =>
@@ -44,7 +44,7 @@ class DelayedTaskIterator(itr: Iterator[Option[QueueItem.Task]], clock: CurrentT
               Some(task)
             case Some(scheduleTime) =>
               // Task is delayed: save it and go to next
-              instrument { taskDelayedTimer.update(scheduleTime - clock.currentTime, TimeUnit.MICROSECONDS) }
+              instrument { taskDelayedTimer.update(scheduleTime - clock.currentTime, TIMER_UNIT) }
               _delayedTasks += (scheduleTime, task.taskId) -> task
               next()
           }

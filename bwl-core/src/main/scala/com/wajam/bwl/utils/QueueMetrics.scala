@@ -1,6 +1,7 @@
 package com.wajam.bwl.utils
 
-import com.yammer.metrics.scala.Instrumented
+import java.util.concurrent.TimeUnit
+import com.yammer.metrics.scala.{ Instrumented, Timer }
 import com.wajam.bwl.queue.Queue
 import com.wajam.bwl.queue.log.LogQueue
 
@@ -56,6 +57,8 @@ trait LogQueueMetrics extends QueueMetrics { this: LogQueue =>
 }
 
 trait DelayedTaskMetrics extends Instrumentable {
+  val TIMER_UNIT = TimeUnit.MILLISECONDS
+
   lazy val taskWaitTimer = metrics.timer("task-wait-time", scope)
   lazy val taskDelayedTimer = metrics.timer("task-delayed-time", scope)
 
