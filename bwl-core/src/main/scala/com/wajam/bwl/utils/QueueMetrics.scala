@@ -19,7 +19,7 @@ trait DisabledMetrics extends Instrumentable {
   override val prioritiesList = Nil
 }
 
-trait QueueMetrics extends DelayedTaskMetrics with LogCleanerMetrics { this: Queue =>
+trait QueueMetrics extends DelayedTaskMetrics { this: Queue =>
 
   val scope = s"${name}-${token}"
 
@@ -43,7 +43,7 @@ trait QueueMetrics extends DelayedTaskMetrics with LogCleanerMetrics { this: Que
   }
 }
 
-trait LogQueueMetrics extends QueueMetrics { this: LogQueue =>
+trait LogQueueMetrics extends QueueMetrics with LogCleanerMetrics { this: LogQueue =>
 
   instrument {
     val truncatedTasksGauge = metrics.gauge("truncated-tasks-count", scope) {
