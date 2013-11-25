@@ -139,7 +139,7 @@ trait ConsistentBwl extends ConsistentStore with Startable {
     if (!cluster.isLocalNode(member.node) && !initializedReplicas.contains(member.token)) {
       synchronized {
         // TODO: Create only consistent queues once factory is moved to the queue definition
-        val newQueues = definitions.map(definition => queueFactory.createQueue(member.token, definition, this, false))
+        val newQueues = definitions.map(definition => queueFactory.createQueue(member.token, definition, this, instrumented = false))
         newQueues.foreach(_.start())
         replicaQueues ++= newQueues.map(queue => (member.token, queue.name) -> queue)
         initializedReplicas += member.token

@@ -133,7 +133,7 @@ object BwlFixture {
 
     def factory = new QueueFactory {
       def createQueue(token: Long, definition: QueueDefinition, service: Service, instrumented: Boolean = false) = {
-        val queue = queueFactory.factory.createQueue(token, definition, service, false)
+        val queue = queueFactory.factory.createQueue(token, definition, service, instrumented)
         spyQueues = spy[Queue](queue) :: spyQueues
         spyQueues.head
       }
