@@ -10,17 +10,18 @@ import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.spnl.feeder.Feeder
 import com.wajam.spnl.feeder.Feeder._
 import com.wajam.spnl.TaskContext
-import com.wajam.bwl.utils.PeekIterator
+import com.wajam.bwl.utils.{ QueueMetrics, PeekIterator, DelayedTaskIterator }
 import com.wajam.bwl.queue._
 import com.wajam.bwl.QueueResource._
-import com.wajam.bwl.utils.DelayedTaskIterator
 import com.wajam.bwl.queue.QueueDefinition
 
 /**
  * Simple memory queue. MUST not be used in production.
  */
-class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit random: Random = Random, clock: CurrentTime = new CurrentTime {}) extends Queue {
+class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit random: Random = Random, clock: CurrentTime = new CurrentTime {}) extends Queue with QueueMetrics {
   self =>
+
+  implicit val queueMetrics = this
 
   private val selector = new PrioritySelector(priorities)
   private val queues = priorities.map(_.value -> new ConcurrentLinkedQueue[QueueItem.Task]).toMap
@@ -96,7 +97,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
 object MemoryQueue {
 
   class Factory(implicit random: Random = Random, clock: CurrentTime = new CurrentTime {}) extends QueueFactory {
-    def createQueue(token: Long, definition: QueueDefinition, service: Service): Queue = {
+    def createQueue(token: Long, definition: QueueDefinition, service: Service, instrument: Boolean = true): Queue = {
       new MemoryQueue(token, definition)
     }
   }

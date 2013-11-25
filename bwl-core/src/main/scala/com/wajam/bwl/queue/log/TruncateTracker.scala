@@ -16,6 +16,8 @@ class TruncateTracker(persistFile: File) extends Logging {
   @volatile
   private var truncated: TreeSet[Timestamp] = read()
 
+  def count = truncated.size
+
   /**
    * Returns true if the specified timestamp is in the truncate list
    */

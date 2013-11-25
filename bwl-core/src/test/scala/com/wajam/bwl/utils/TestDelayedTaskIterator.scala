@@ -11,6 +11,8 @@ import com.wajam.bwl.queue.QueueItem
 @RunWith(classOf[JUnitRunner])
 class TestDelayedTaskIterator extends FlatSpec {
 
+  implicit val metrics = new DelayedTaskMetrics with DisabledMetrics
+
   private def task(taskId: Long, priority: Int = 1, executeAfter: Option[Long] = None) = QueueItem.Task("name", taskId, priority, taskId, taskId, executeAfter)
 
   private def delayedTaskIterator(tasks: List[Option[QueueItem.Task]], timer: CurrentTime = new CurrentTime {}) = new DelayedTaskIterator(tasks.toIterator, timer)

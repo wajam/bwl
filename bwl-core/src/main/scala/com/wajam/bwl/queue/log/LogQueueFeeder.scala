@@ -6,7 +6,7 @@ import com.wajam.bwl.queue.QueueItem
 import scala.collection.immutable.TreeMap
 import com.wajam.spnl.TaskContext
 import com.wajam.bwl.queue.{ QueueDefinition, PrioritySelector }
-import com.wajam.bwl.utils.{ DelayedTaskIterator, FeederPositionTracker, PeekIterator }
+import com.wajam.bwl.utils._
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.bwl.QueueResource._
 import com.wajam.spnl.feeder.Feeder._
@@ -15,7 +15,7 @@ import scala.util.Random
 /**
  * Feeder implementation for the LogQueue persistent queue.
  */
-class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Option[Timestamp]) => PriorityTaskItemReader)(implicit random: Random = Random, timer: CurrentTime = new CurrentTime {})
+class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Option[Timestamp]) => PriorityTaskItemReader)(implicit metrics: DelayedTaskMetrics, random: Random = Random, timer: CurrentTime = new CurrentTime {})
     extends Feeder {
 
   private val selector = new PrioritySelector(definition.priorities)

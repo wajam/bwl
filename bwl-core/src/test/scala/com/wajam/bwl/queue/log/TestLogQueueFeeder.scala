@@ -15,9 +15,12 @@ import org.mockito.stubbing.Answer
 import org.mockito.invocation.InvocationOnMock
 import scala.util.Random
 import com.wajam.commons.ControlableCurrentTime
+import com.wajam.bwl.utils.{ DelayedTaskMetrics, DisabledMetrics }
 
 @RunWith(classOf[JUnitRunner])
 class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
+
+  implicit val metrics = new DelayedTaskMetrics with DisabledMetrics
 
   private def task(id: Long, priority: Int = 1, scheduleTime: Option[Long] = None): QueueItem.Task = QueueItem.Task("name", id, priority, id, data = id, scheduleTime = scheduleTime)
 

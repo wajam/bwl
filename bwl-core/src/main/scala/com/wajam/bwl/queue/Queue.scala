@@ -96,7 +96,7 @@ trait Queue {
 }
 
 trait QueueFactory {
-  def createQueue(token: Long, definition: QueueDefinition, service: Service): Queue
+  def createQueue(token: Long, definition: QueueDefinition, service: Service, instrumented: Boolean = true): Queue
 }
 
 trait QueueCallback {
