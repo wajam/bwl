@@ -112,5 +112,9 @@ object QueueCallback {
     object Ok extends Result
 
     case class Fail(error: Exception, ignore: Boolean = false) extends Result
+
+    case class TryLater(error: Exception, delay: Long) extends Result {
+      require(delay > 0, "TryLater delay must be greater than 0")
+    }
   }
 }

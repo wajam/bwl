@@ -153,6 +153,11 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
         case QueueCallback.Result.Fail(error, ignore) => executeIfCallbackNotExpired {
           request.fail(error)
         }
+        case QueueCallback.Result.TryLater(error, delay) => executeIfCallbackNotExpired {
+          ack(taskToken, definition.name, taskId, priority)
+          enqueue(taskToken, definition.name, data.values("data"), data.values.get(TaskPriority).map(_.toString.toInt), Some(delay))
+          request.ignore(error)
+        }
       }
       response.onFailure {
         case e: Exception => request.fail(e)
