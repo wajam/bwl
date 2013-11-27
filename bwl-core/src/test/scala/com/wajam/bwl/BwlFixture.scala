@@ -170,6 +170,11 @@ abstract class FailCallbackFixture(ignore: Boolean = false, delay: Long = 0L) ex
     new QueueCallbackAnswer(delay, QueueCallback.Result.Fail(new Exception(), ignore)))
 }
 
+abstract class TryLaterCallbackFixture(delay: Long) extends CallbackFixture {
+  when(mockCallback.execute(anyObject())).thenAnswer(
+    new QueueCallbackAnswer(0, QueueCallback.Result.TryLater(new Exception(), delay)))
+}
+
 trait SinglePriorityQueueFixture {
   this: BwlFixture with CallbackFixture =>
 

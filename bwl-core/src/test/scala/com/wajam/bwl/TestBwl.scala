@@ -239,4 +239,37 @@ class TestBwl extends FunSuite {
     })
   }
 
+  test("try later callback should trigger another enqueue") {
+    val delay = 10000L
+
+    // Reduce SPNL retry delay with a Random that always returns 0
+    implicit val random = new Random(new java.util.Random() {
+      override def next(bits: Int) = 0
+    })
+
+    implicit val spyQueueFactory = new SpyQueueFactory(memoryQueueFactory)
+
+    new TryLaterCallbackFixture(delay) with BwlFixture with SinglePriorityQueueFixture {}.runWithFixture((f) => {
+      import ExecutionContext.Implicits.global
+
+      f.bwl.enqueue(0, f.definitions.head.name, "hello")
+
+      // Wait for the callback to be executed
+      verify(f.mockCallback, timeout(2000)).execute(ArgumentCaptor.forClass(classOf[String]).capture())
+
+      val spyQueue = spyQueueFactory.allQueues.head
+      val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
+      val ackCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Ack])
+
+      // Ensure the task is enqueued again
+      verify(spyQueue, timeout(2000).times(2)).enqueue(taskCaptor.capture())
+
+      // Ensure the task is acknowledged
+      verify(spyQueue).ack(ackCaptor.capture())
+
+      // Ensure the new task is delayed
+      taskCaptor.getAllValues.last.scheduleTime should not be 'empty
+    })
+  }
+
 }
