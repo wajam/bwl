@@ -169,7 +169,7 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
         case QueueCallback.Result.Fail(error, ignore) => executeIfCallbackNotExpired(resultFailTimer, resultExpiredFailTimer) {
           request.fail(error)
         }
-        case QueueCallback.Result.TryLater(error, delay) => executeIfCallbackNotExpired {
+        case QueueCallback.Result.TryLater(error, delay) => executeIfCallbackNotExpired(resultTryLaterTimer, resultExpiredTryLaterTimer) {
           ack(taskToken, definition.name, taskId, priority)
           enqueue(taskToken, definition.name, data.values("data"), data.values.get(TaskPriority).map(_.toString.toInt), Some(delay))
           request.ignore(error)
@@ -215,10 +215,12 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
     val resultOkTimer = timer("callback-result-ok-time")
     val resultIgnoreTimer = timer("callback-result-ignore-time")
     val resultFailTimer = timer("callback-result-fail-time")
+    val resultTryLaterTimer = timer("callback-result-trylater-time")
     val resultRetryMaxReached = counter("callback-result-retry-max-reached")
     val resultExpiredOkTimer = timer("callback-result-expired-ok-time")
     val resultExpiredIgnoreTimer = timer("callback-result-expired-ignore-time")
     val resultExpiredFailTimer = timer("callback-result-expired-fail-time")
+    val resultExpiredTryLaterTimer = timer("callback-result-expired-trylater-time")
     val exceptionTimer = timer("callback-exception-time")
   }
 }
