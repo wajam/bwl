@@ -15,7 +15,7 @@ import com.yammer.metrics.scala.{ Timer, Counter, Instrumented }
 
 class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefinition], protected val queueFactory: QueueFactory,
           spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)(implicit random: Random = Random)
-    extends Service(serviceName) with Logging with CurrentTime {
+    extends Service(serviceName) with Logging {
 
   val metricsPerQueue = definitions.map { definition =>
     definition.name -> new BwlMetrics(serviceName, definition, Bwl.this)
@@ -143,14 +143,15 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
     def executeCallback() {
       val startTime = System.currentTimeMillis()
 
+      def elapsedTime = System.currentTimeMillis() - startTime
+
       def executeIfCallbackNotExpired(executedTimer: Timer, expiredTimer: Timer)(function: => Any) {
-        val elapsedTime = System.currentTimeMillis() - startTime
         trace(s"'Task $taskId ($taskToken:${definition.name}#$priority) callback elapsedTime: $elapsedTime")
         if (elapsedTime < callbackTimeout) {
-          executedTimer.update(currentTime - startTime, TimeUnit.MILLISECONDS)
+          executedTimer.update(elapsedTime, TimeUnit.MILLISECONDS)
           function
         } else {
-          expiredTimer.update(currentTime - startTime, TimeUnit.MILLISECONDS)
+          expiredTimer.update(elapsedTime, TimeUnit.MILLISECONDS)
           warn(s"Task $taskId ($taskToken:${definition.name}#$priority) callback took too much time to execute ($elapsedTime ms)")
         }
       }
@@ -171,16 +172,16 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
       }
       response.onFailure {
         case e: Exception =>
-          exceptionTimer.update(currentTime - startTime, TimeUnit.MILLISECONDS)
+          exceptionTimer.update(elapsedTime, TimeUnit.MILLISECONDS)
           request.fail(e)
         case t =>
-          exceptionTimer.update(currentTime - startTime, TimeUnit.MILLISECONDS)
+          exceptionTimer.update(elapsedTime, TimeUnit.MILLISECONDS)
           request.fail(new Exception(t))
       }
     }
   }
 
-  private def delayToScheduleTime(delay: Long) = currentTime + delay
+  private def delayToScheduleTime(delay: Long) = System.currentTimeMillis() + delay
 
   override def start() {
     super.start()
