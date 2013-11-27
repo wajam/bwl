@@ -18,7 +18,7 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
     extends Service(serviceName) with Logging {
 
   val metricsPerQueue = definitions.map { definition =>
-    definition.name -> new BwlMetrics(serviceName, definition, Bwl.this)
+    definition.name -> new BwlMetrics(serviceName, definition)
   }.toMap
 
   protected[bwl] def getMetricsClass: Class[_] = classOf[Bwl]
@@ -199,21 +199,21 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
     internalQueues.valuesIterator.foreach(_.stop())
     internalQueues = Map()
   }
-}
 
-class BwlMetrics(serviceName: String, definition: QueueDefinition, bwlInstance: Bwl) extends Instrumented {
-  val metricsClass = bwlInstance.getMetricsClass
-  val metricsScope = s"$serviceName.${definition.name}"
+  class BwlMetrics(serviceName: String, definition: QueueDefinition) extends Instrumented {
+    val metricsClass = getMetricsClass
+    val metricsScope = s"$serviceName.${definition.name}"
 
-  def timer(name: String) = new Timer(metrics.metricsRegistry.newTimer(metricsClass, name, metricsScope))
-  def counter(name: String) = new Counter(metrics.metricsRegistry.newCounter(metricsClass, name, metricsScope))
+    def timer(name: String) = new Timer(metrics.metricsRegistry.newTimer(metricsClass, name, metricsScope))
+    def counter(name: String) = new Counter(metrics.metricsRegistry.newCounter(metricsClass, name, metricsScope))
 
-  val resultOkTimer = timer("callback-result-ok-time")
-  val resultIgnoreTimer = timer("callback-result-ignore-time")
-  val resultFailTimer = timer("callback-result-fail-time")
-  val resultRetryMaxReached = counter("callback-result-retry-max-reached")
-  val resultExpiredOkTimer = timer("callback-result-expired-ok-time")
-  val resultExpiredIgnoreTimer = timer("callback-result-expired-ignore-time")
-  val resultExpiredFailTimer = timer("callback-result-expired-fail-time")
-  val exceptionTimer = timer("callback-exception-time")
+    val resultOkTimer = timer("callback-result-ok-time")
+    val resultIgnoreTimer = timer("callback-result-ignore-time")
+    val resultFailTimer = timer("callback-result-fail-time")
+    val resultRetryMaxReached = counter("callback-result-retry-max-reached")
+    val resultExpiredOkTimer = timer("callback-result-expired-ok-time")
+    val resultExpiredIgnoreTimer = timer("callback-result-expired-ignore-time")
+    val resultExpiredFailTimer = timer("callback-result-expired-fail-time")
+    val exceptionTimer = timer("callback-exception-time")
+  }
 }
