@@ -15,7 +15,13 @@ import com.yammer.metrics.scala.{ Timer, Counter, Instrumented }
 
 class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefinition], protected val queueFactory: QueueFactory,
           spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)(implicit random: Random = Random)
-    extends Service(serviceName) with Logging with CurrentTime with BwlMetrics {
+    extends Service(serviceName) with Logging with CurrentTime {
+
+  val metricsPerQueue = definitions.map { definition =>
+    definition.name -> new BwlMetrics(serviceName, definition, Bwl.this)
+  }.toMap
+
+  protected[bwl] def getMetricsClass: Class[_] = classOf[Bwl]
 
   protected case class QueueWrapper(queue: Queue, task: Task) {
     def start() {
@@ -103,14 +109,9 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
   private def queueCallbackAdapter(definition: QueueDefinition)(request: SpnlRequest) {
     import QueueResource._
 
-    lazy val resultOkTimer = bwlMetrics.timer("callback-result-ok-time", definition.name)
-    lazy val resultIgnoreTimer = bwlMetrics.timer("callback-result-ignore-time", definition.name)
-    lazy val resultFailTimer = bwlMetrics.timer("callback-result-fail-time", definition.name)
-    lazy val resultRetryMaxReached = bwlMetrics.counter("callback-result-retry-max-reached", definition.name)
-    lazy val resultExpiredOkTimer = bwlMetrics.timer("callback-result-expired-ok-time", definition.name)
-    lazy val resultExpiredIgnoreTimer = bwlMetrics.timer("callback-result-expired-ignore-time", definition.name)
-    lazy val resultExpiredFailTimer = bwlMetrics.timer("callback-result-expired-fail-time", definition.name)
-    lazy val exceptionTimer = bwlMetrics.timer("callback-exception-time", definition.name)
+    // Load metrics for this queue
+    val metrics = metricsPerQueue(definition.name)
+    import metrics._
 
     implicit val sameThreadExecutionContext = new ExecutionContext {
       def execute(runnable: Runnable) {
@@ -199,13 +200,19 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
   }
 }
 
-trait BwlMetrics extends Instrumented {
+class BwlMetrics(serviceName: String, definition: QueueDefinition, bwlInstance: Bwl) extends Instrumented {
+  val metricsClass = bwlInstance.getMetricsClass
+  val metricsScope = s"$serviceName.${definition.name}"
 
-  val bwlMetrics = new {
-    // TODO: Bind the appropriate Queue implementation
-    val className = com.wajam.bwl.queue.log.LogQueue.getClass
+  def timer(name: String) = new Timer(metrics.metricsRegistry.newTimer(metricsClass, name, metricsScope))
+  def counter(name: String) = new Counter(metrics.metricsRegistry.newCounter(metricsClass, name, metricsScope))
 
-    def timer(name: String, scope: String) = new Timer(metrics.metricsRegistry.newTimer(className, name, scope))
-    def counter(name: String, scope: String) = new Counter(metrics.metricsRegistry.newCounter(className, name, scope))
-  }
+  val resultOkTimer = timer("callback-result-ok-time")
+  val resultIgnoreTimer = timer("callback-result-ignore-time")
+  val resultFailTimer = timer("callback-result-fail-time")
+  val resultRetryMaxReached = counter("callback-result-retry-max-reached")
+  val resultExpiredOkTimer = timer("callback-result-expired-ok-time")
+  val resultExpiredIgnoreTimer = timer("callback-result-expired-ignore-time")
+  val resultExpiredFailTimer = timer("callback-result-expired-fail-time")
+  val exceptionTimer = timer("callback-exception-time")
 }
