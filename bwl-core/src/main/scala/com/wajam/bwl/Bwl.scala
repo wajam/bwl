@@ -157,7 +157,7 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
 
       val response = definition.callback.execute(data.values("data")).recover {
         case e: QueueCallback.ResultException => {
-          info("", e)
+          info("Callback error: ", e)
           e.result
         }
       }
@@ -185,13 +185,13 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
           val elapsedTime = System.currentTimeMillis() - startTime
           exceptionTimer.update(elapsedTime, TimeUnit.MILLISECONDS)
           request.fail(e)
-          warn(s"Unhandled callback exception: ", e)
+          warn("Unhandled callback exception: ", e)
         }
         case t => {
           val elapsedTime = System.currentTimeMillis() - startTime
           exceptionTimer.update(elapsedTime, TimeUnit.MILLISECONDS)
           request.fail(new Exception(t))
-          warn(s"Unhandled callback throwable: ", t)
+          warn("Unhandled callback throwable: ", t)
         }
       }
     }
