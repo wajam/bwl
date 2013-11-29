@@ -107,14 +107,29 @@ object QueueCallback {
 
   sealed trait Result
 
+  sealed trait ResultError extends Result {
+    def error: Exception
+  }
+
   object Result {
 
     object Ok extends Result
 
-    case class Fail(error: Exception, ignore: Boolean = false) extends Result
+    case class Fail(error: Exception, ignore: Boolean = false) extends ResultError
 
-    case class TryLater(error: Exception, delay: Long) extends Result {
+    case class TryLater(error: Exception, delay: Long) extends ResultError {
       require(delay > 0, "TryLater delay must be greater than 0")
+    }
+  }
+
+  class ResultException(message: String, val result: QueueCallback.ResultError)
+      extends Exception(resultMessage(message, result), result.error) {
+  }
+
+  private def resultMessage(message: String, result: QueueCallback.ResultError): String = {
+    result match {
+      case f: QueueCallback.Result.Fail => s"Fail(ignore=${f.ignore}}): $message"
+      case tl: QueueCallback.Result.TryLater => s"TryLater(delay=${tl.delay}}): $message"
     }
   }
 }
