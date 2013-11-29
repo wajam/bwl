@@ -143,9 +143,8 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
     def executeCallback() {
       val startTime = System.currentTimeMillis()
 
-      def elapsedTime = System.currentTimeMillis() - startTime
-
       def executeIfCallbackNotExpired(executedTimer: Timer, expiredTimer: Timer)(function: => Any) {
+        val elapsedTime = System.currentTimeMillis() - startTime
         trace(s"'Task $taskId ($taskToken:${definition.name}#$priority) callback elapsedTime: $elapsedTime")
         if (elapsedTime < callbackTimeout) {
           executedTimer.update(elapsedTime, TimeUnit.MILLISECONDS)
@@ -156,32 +155,44 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
         }
       }
 
-      val response = definition.callback.execute(data.values("data"))
+      val response = definition.callback.execute(data.values("data")).recover {
+        case e: QueueCallback.ResultException => {
+          info("Callback error: ", e)
+          e.result
+        }
+      }
+
       response.onSuccess {
         case QueueCallback.Result.Ok => executeIfCallbackNotExpired(resultOkTimer, resultExpiredOkTimer) {
-          ack(taskToken, definition.name, taskId, priority)
           request.ok()
+          ack(taskToken, definition.name, taskId, priority)
         }
         case QueueCallback.Result.Fail(error, ignore) if ignore => executeIfCallbackNotExpired(resultIgnoreTimer, resultExpiredIgnoreTimer) {
-          ack(taskToken, definition.name, taskId, priority)
           request.ignore(error)
+          ack(taskToken, definition.name, taskId, priority)
         }
         case QueueCallback.Result.Fail(error, ignore) => executeIfCallbackNotExpired(resultFailTimer, resultExpiredFailTimer) {
           request.fail(error)
         }
         case QueueCallback.Result.TryLater(error, delay) => executeIfCallbackNotExpired(resultTryLaterTimer, resultExpiredTryLaterTimer) {
+          request.ignore(error)
           ack(taskToken, definition.name, taskId, priority)
           enqueue(taskToken, definition.name, data.values("data"), data.values.get(TaskPriority).map(_.toString.toInt), Some(delay))
-          request.ignore(error)
         }
       }
       response.onFailure {
-        case e: Exception =>
+        case e: Exception => {
+          val elapsedTime = System.currentTimeMillis() - startTime
           exceptionTimer.update(elapsedTime, TimeUnit.MILLISECONDS)
           request.fail(e)
-        case t =>
+          warn("Unhandled callback exception: ", e)
+        }
+        case t => {
+          val elapsedTime = System.currentTimeMillis() - startTime
           exceptionTimer.update(elapsedTime, TimeUnit.MILLISECONDS)
           request.fail(new Exception(t))
+          warn("Unhandled callback throwable: ", t)
+        }
       }
     }
   }
