@@ -283,4 +283,22 @@ class TestBwl extends FunSuite {
     })
   }
 
+  test("Delay should be respected") {
+    val delay = 1000L
+
+    implicit val queueFactory = persistentQueueFactory
+
+    new OkCallbackFixture with BwlFixture with SinglePriorityQueueFixture {}.runWithFixture((f) => {
+      import ExecutionContext.Implicits.global
+
+      f.bwl.enqueue(0, f.definitions.head.name, "good bye", delay = Some(delay))
+      f.bwl.enqueue(1, f.definitions.head.name, "hello")
+
+      val stringCaptor = ArgumentCaptor.forClass(classOf[String])
+
+      verify(f.mockCallback, timeout(2000).times(2)).execute(stringCaptor.capture())
+
+      stringCaptor.getAllValues.toList should be(List("hello", "good bye"))
+    })
+  }
 }
