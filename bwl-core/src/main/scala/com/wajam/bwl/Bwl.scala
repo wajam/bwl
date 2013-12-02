@@ -1,5 +1,6 @@
 package com.wajam.bwl
 
+import java.util.concurrent.TimeUnit
 import com.wajam.nrv.service.{ ServiceMember, Resolver, Service }
 import com.wajam.nrv.data.{ MLong, MValue, MInt }
 import com.wajam.nrv.data.MValue._
@@ -10,10 +11,17 @@ import com.wajam.spnl._
 import com.wajam.bwl.queue.QueueDefinition
 import com.wajam.commons.{ CurrentTime, Logging }
 import scala.util.Random
+import com.yammer.metrics.scala.{ Timer, Counter, Instrumented }
 
 class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefinition], protected val queueFactory: QueueFactory,
           spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)(implicit random: Random = Random)
-    extends Service(serviceName) with Logging with CurrentTime {
+    extends Service(serviceName) with Logging {
+
+  val metricsPerQueue = definitions.map { definition =>
+    definition.name -> new BwlMetrics(serviceName, definition)
+  }.toMap
+
+  protected[bwl] def getMetricsClass: Class[_] = classOf[Bwl]
 
   protected case class QueueWrapper(queue: Queue, task: Task) {
     def start() {
@@ -101,6 +109,10 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
   private def queueCallbackAdapter(definition: QueueDefinition)(request: SpnlRequest) {
     import QueueResource._
 
+    // Load metrics for this queue
+    val metrics = metricsPerQueue(definition.name)
+    import metrics._
+
     implicit val sameThreadExecutionContext = new ExecutionContext {
       def execute(runnable: Runnable) {
         runnable.run()
@@ -119,6 +131,7 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
     definition.maxRetryCount match {
       case Some(maxRetryCount) if data.retryCount > maxRetryCount => {
         // Task max retry count reach. Do not execute callback.
+        resultRetryMaxReached += 1
         ack(taskToken, definition.name, taskId, priority)
         val msg = s"Task $taskId ($taskToken:${definition.name}#$priority) not executed. Maximum retry count ($maxRetryCount) reached."
         request.ignore(new Exception(msg))
@@ -130,43 +143,61 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
     def executeCallback() {
       val startTime = System.currentTimeMillis()
 
-      def executeIfCallbackNotExpired(function: => Any) {
+      def executeIfCallbackNotExpired(executedTimer: Timer, expiredTimer: Timer)(function: => Any) {
         val elapsedTime = System.currentTimeMillis() - startTime
         trace(s"'Task $taskId ($taskToken:${definition.name}#$priority) callback elapsedTime: $elapsedTime")
         if (elapsedTime < callbackTimeout) {
+          executedTimer.update(elapsedTime, TimeUnit.MILLISECONDS)
           function
         } else {
+          expiredTimer.update(elapsedTime, TimeUnit.MILLISECONDS)
           warn(s"Task $taskId ($taskToken:${definition.name}#$priority) callback took too much time to execute ($elapsedTime ms)")
         }
       }
 
-      val response = definition.callback.execute(data.values("data"))
+      val response = definition.callback.execute(data.values("data")).recover {
+        case e: QueueCallback.ResultException => {
+          info("Callback error: ", e)
+          e.result
+        }
+      }
+
       response.onSuccess {
-        case QueueCallback.Result.Ok => executeIfCallbackNotExpired {
-          ack(taskToken, definition.name, taskId, priority)
+        case QueueCallback.Result.Ok => executeIfCallbackNotExpired(resultOkTimer, resultExpiredOkTimer) {
           request.ok()
-        }
-        case QueueCallback.Result.Fail(error, ignore) if ignore => executeIfCallbackNotExpired {
           ack(taskToken, definition.name, taskId, priority)
-          request.ignore(error)
         }
-        case QueueCallback.Result.Fail(error, ignore) => executeIfCallbackNotExpired {
+        case QueueCallback.Result.Fail(error, ignore) if ignore => executeIfCallbackNotExpired(resultIgnoreTimer, resultExpiredIgnoreTimer) {
+          request.ignore(error)
+          ack(taskToken, definition.name, taskId, priority)
+        }
+        case QueueCallback.Result.Fail(error, ignore) => executeIfCallbackNotExpired(resultFailTimer, resultExpiredFailTimer) {
           request.fail(error)
         }
-        case QueueCallback.Result.TryLater(error, delay) => executeIfCallbackNotExpired {
+        case QueueCallback.Result.TryLater(error, delay) => executeIfCallbackNotExpired(resultTryLaterTimer, resultExpiredTryLaterTimer) {
+          request.ignore(error)
           ack(taskToken, definition.name, taskId, priority)
           enqueue(taskToken, definition.name, data.values("data"), data.values.get(TaskPriority).map(_.toString.toInt), Some(delay))
-          request.ignore(error)
         }
       }
       response.onFailure {
-        case e: Exception => request.fail(e)
-        case t => request.fail(new Exception(t))
+        case e: Exception => {
+          val elapsedTime = System.currentTimeMillis() - startTime
+          exceptionTimer.update(elapsedTime, TimeUnit.MILLISECONDS)
+          request.fail(e)
+          warn("Unhandled callback exception: ", e)
+        }
+        case t => {
+          val elapsedTime = System.currentTimeMillis() - startTime
+          exceptionTimer.update(elapsedTime, TimeUnit.MILLISECONDS)
+          request.fail(new Exception(t))
+          warn("Unhandled callback throwable: ", t)
+        }
       }
     }
   }
 
-  private def delayToScheduleTime(delay: Long) = currentTime + delay
+  private def delayToScheduleTime(delay: Long) = System.currentTimeMillis() + delay
 
   override def start() {
     super.start()
@@ -183,5 +214,24 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
 
     internalQueues.valuesIterator.foreach(_.stop())
     internalQueues = Map()
+  }
+
+  class BwlMetrics(serviceName: String, definition: QueueDefinition) extends Instrumented {
+    val metricsClass = getMetricsClass
+    val metricsScope = s"$serviceName.${definition.name}"
+
+    def timer(name: String) = new Timer(metrics.metricsRegistry.newTimer(metricsClass, name, metricsScope))
+    def counter(name: String) = new Counter(metrics.metricsRegistry.newCounter(metricsClass, name, metricsScope))
+
+    val resultOkTimer = timer("callback-result-ok-time")
+    val resultIgnoreTimer = timer("callback-result-ignore-time")
+    val resultFailTimer = timer("callback-result-fail-time")
+    val resultTryLaterTimer = timer("callback-result-trylater-time")
+    val resultRetryMaxReached = counter("callback-result-retry-max-reached")
+    val resultExpiredOkTimer = timer("callback-result-expired-ok-time")
+    val resultExpiredIgnoreTimer = timer("callback-result-expired-ignore-time")
+    val resultExpiredFailTimer = timer("callback-result-expired-fail-time")
+    val resultExpiredTryLaterTimer = timer("callback-result-expired-trylater-time")
+    val exceptionTimer = timer("callback-exception-time")
   }
 }

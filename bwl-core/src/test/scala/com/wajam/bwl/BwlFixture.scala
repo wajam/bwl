@@ -146,8 +146,11 @@ trait CallbackFixture extends MockitoSugar {
 
   val mockCallback: QueueCallback = mock[QueueCallback]
 
-  class QueueCallbackAnswer(delay: Long, result: QueueCallback.Result) extends Answer[Future[QueueCallback.Result]] {
+  def result: QueueCallback.Result
 
+  def delay: Long
+
+  when(mockCallback.execute(anyObject())).thenAnswer(new Answer[Future[QueueCallback.Result]] {
     import scala.concurrent.future
     import ExecutionContext.Implicits.global
 
@@ -155,24 +158,21 @@ trait CallbackFixture extends MockitoSugar {
       Thread.sleep(delay)
       result
     }
+  })
+}
+
+abstract class OkCallbackFixture(val delay: Long = 0L) extends CallbackFixture {
+  def result = QueueCallback.Result.Ok
+}
+
+abstract class ErrorCallbackFixture(resultError: QueueCallback.ResultError, useResultException: Boolean = false,
+                                    val delay: Long = 0L) extends CallbackFixture {
+  def result = {
+    if (useResultException) {
+      throw new QueueCallback.ResultException("", resultError)
+    }
+    resultError
   }
-
-}
-
-abstract class OkCallbackFixture(delay: Long = 0L) extends CallbackFixture {
-  when(mockCallback.execute(anyObject())).thenAnswer(new QueueCallbackAnswer(delay, QueueCallback.Result.Ok))
-}
-
-abstract class FailCallbackFixture(ignore: Boolean = false, delay: Long = 0L) extends CallbackFixture {
-  this: BwlFixture =>
-
-  when(mockCallback.execute(anyObject())).thenAnswer(
-    new QueueCallbackAnswer(delay, QueueCallback.Result.Fail(new Exception(), ignore)))
-}
-
-abstract class TryLaterCallbackFixture(delay: Long) extends CallbackFixture {
-  when(mockCallback.execute(anyObject())).thenAnswer(
-    new QueueCallbackAnswer(0, QueueCallback.Result.TryLater(new Exception(), delay)))
 }
 
 trait SinglePriorityQueueFixture {
