@@ -9,17 +9,14 @@ import scala.concurrent.{ ExecutionContext, Future }
 import com.wajam.bwl.queue.QueueFactory
 import com.wajam.spnl._
 import com.wajam.bwl.queue.QueueDefinition
-import com.wajam.commons.{ CurrentTime, Logging }
+import com.wajam.commons.Logging
 import scala.util.Random
 import com.yammer.metrics.scala.{ Timer, Counter, Instrumented }
+import com.yammer.metrics.core.Gauge
 
 class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefinition], protected val queueFactory: QueueFactory,
           spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)(implicit random: Random = Random)
     extends Service(serviceName) with Logging {
-
-  val metricsPerQueue = definitions.map { definition =>
-    definition.name -> new BwlMetrics(serviceName, definition)
-  }.toMap
 
   protected[bwl] def getMetricsClass: Class[_] = classOf[Bwl]
 
@@ -40,6 +37,10 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
   private var internalQueues: Map[(Long, String), QueueWrapper] = Map()
 
   protected def queues: Map[(Long, String), QueueWrapper] = internalQueues
+
+  private val metricsPerQueue = definitions.map { definition =>
+    definition.name -> new BwlMetrics(serviceName, definition)
+  }.toMap
 
   applySupport(resolver = Some(new Resolver(tokenExtractor = Resolver.TOKEN_PARAM("token"))))
 
@@ -216,12 +217,15 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
     internalQueues = Map()
   }
 
+  /* Metrics per queue */
   class BwlMetrics(serviceName: String, definition: QueueDefinition) extends Instrumented {
     val metricsClass = getMetricsClass
     val metricsScope = s"$serviceName.${definition.name}"
 
+    /* Helpers to create metrics associated with the Bwl class */
     def timer(name: String) = new Timer(metrics.metricsRegistry.newTimer(metricsClass, name, metricsScope))
     def counter(name: String) = new Counter(metrics.metricsRegistry.newCounter(metricsClass, name, metricsScope))
+    def gauge[A](name: String)(f: => A) = metrics.metricsRegistry.newGauge(metricsClass, name, metricsScope, new Gauge[A] { def value = f })
 
     val resultOkTimer = timer("callback-result-ok-time")
     val resultIgnoreTimer = timer("callback-result-ignore-time")
@@ -233,5 +237,17 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
     val resultExpiredFailTimer = timer("callback-result-expired-fail-time")
     val resultExpiredTryLaterTimer = timer("callback-result-expired-trylater-time")
     val exceptionTimer = timer("callback-exception-time")
+
+    def queueStats = queues.valuesIterator.filter(_.queue.name == definition.name).map(_.queue.stats)
+
+    val globalTotalTasksGauge = gauge("total-tasks") {
+      queueStats.map(_.totalTasks).reduceOption(_ + _).getOrElse(0)
+    }
+    val globalPendingTasksGauge = gauge("pending-tasks") {
+      queueStats.map(_.pendingTasks.size).reduceOption(_ + _).getOrElse(0)
+    }
+    val globalDelayedTasksGauge = gauge("delayed-tasks") {
+      queueStats.map(_.delayedTasks.size).reduceOption(_ + _).getOrElse(0)
+    }
   }
 }
