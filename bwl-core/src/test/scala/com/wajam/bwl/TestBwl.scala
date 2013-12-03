@@ -293,7 +293,7 @@ class TestBwl extends FunSuite {
       })
     }
 
-    test(prefix + " - should be respected") {
+    test(prefix + " - delayed tasks should be executed in order") {
       val delay = 1000L
 
       implicit val queueFactory = persistentQueueFactory
