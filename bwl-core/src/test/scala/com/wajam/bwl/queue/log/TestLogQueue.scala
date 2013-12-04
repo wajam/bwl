@@ -20,6 +20,7 @@ import com.wajam.bwl.QueueStatsHelper._
 import com.wajam.bwl.FeederTestHelper._
 import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.commons.Closable.using
+import com.wajam.nrv.protocol.codec.GenericJavaSerializeCodec
 
 @RunWith(classOf[JUnitRunner])
 class TestLogQueue extends FlatSpec {
@@ -36,6 +37,8 @@ class TestLogQueue extends FlatSpec {
       override def consistency = new ConsistencyOne()
 
       override def responseTimeout = 1000L
+
+      override def nrvCodec = new GenericJavaSerializeCodec
     }
     val priorities = List(Priority(1, weight = 66), Priority(2, weight = 33))
 

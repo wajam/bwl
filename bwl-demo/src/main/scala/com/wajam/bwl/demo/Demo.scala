@@ -5,7 +5,7 @@ import scala.concurrent.ExecutionContext
 import com.wajam.nrv.cluster._
 import com.wajam.nrv.protocol._
 import com.wajam.nrv.extension.resource._
-import com.wajam.nrv.protocol.codec.StringCodec
+import com.wajam.nrv.protocol.codec.Codec
 import com.wajam.spnl._
 import com.wajam.bwl.{ ConsistentBwl, Bwl }
 import com.wajam.bwl.queue.{ Priority, QueueDefinition }
@@ -117,7 +117,7 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
       node,
       config.getProtocolHttpConnectionTimeoutMs,
       config.getProtocolHttpConnectionPoolMaxSize)
-    httpProtocol.registerCodec("text/plain", new StringCodec)
+    httpProtocol.registerCodec("text/plain", StringCodec)
     httpProtocol.registerCodec("application/json", new JsonCodec)
     httpProtocol
   }
@@ -148,7 +148,7 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
     val service = new Bwl("bwl", definitions, queueFactory, bwlSpnl, spnlPersistenceFactory) with ConsistentBwl with DemoBwlService {
       val spnl: Spnl = bwlSpnl
     }
-    service.applySupport(responseTimeout = Some(config.getBwlTaskTimeout))
+    service.applySupport(responseTimeout = Some(config.getBwlTaskTimeout), nrvCodec = Some(StringCodec))
 
     if (config.getBwlConsistencyReplicationEnabled) {
       val consistencyLogDirectory = new File(config.getBwlConsistencyLogDirectory)
@@ -185,5 +185,28 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
 
   trait DemoBwlService {
     def spnl: Spnl
+  }
+
+  object StringCodec extends Codec {
+
+    def encode(entity: Any, context: Any) = {
+      (entity, context) match {
+        case (value: String, charsetName: String) => value.getBytes(charsetName)
+        case (value: String, _) => value.getBytes
+        case (null, _) => Array[Byte]()
+      }
+    }
+
+    def decode(data: Array[Byte], context: Any) = {
+      if (data.length > 0) {
+        context match {
+          case charsetName: String => new String(data, charsetName)
+          case null => new String(data)
+        }
+      } else {
+        ""
+      }
+
+    }
   }
 }
