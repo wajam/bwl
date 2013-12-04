@@ -8,7 +8,7 @@ import java.io.File
 import java.nio.file.{ Files, Paths }
 import com.wajam.nrv.consistency._
 import com.wajam.nrv.service.{ TokenRange, Service }
-import com.wajam.nrv.consistency.log.{ LogRecord, TimestampedRecord, FileTransactionLog }
+import com.wajam.nrv.consistency.log.{ LogRecordSerializer, LogRecord, TimestampedRecord, FileTransactionLog }
 import com.wajam.nrv.consistency.replication.{ ReplicationSourceIterator, TransactionLogReplicationIterator }
 import com.wajam.bwl.QueueResource._
 import com.wajam.bwl.queue.Priority
@@ -447,6 +447,8 @@ object LogQueue {
       val logDir = Paths.get(dataDir.getCanonicalPath, service.name, "queues")
       Files.createDirectories(logDir)
 
+      val serializer = new LogRecordSerializer(service.nrvCodec)
+
       def consistencyDelay: Long = {
         val timestampTimeout = service.consistency match {
           case consistency: ConsistencyMasterSlave => consistency.timestampGenerator.responseTimeout
@@ -457,7 +459,8 @@ object LogQueue {
 
       def queueNameFor(priority: Priority) = s"${definition.name}#${priority.value}"
 
-      def txLogFor(priority: Priority) = new FileTransactionLog(queueNameFor(priority), token, logDir.toString, logFileRolloverSize)
+      def txLogFor(priority: Priority) = new FileTransactionLog(queueNameFor(priority), token, logDir.toString,
+        logFileRolloverSize, serializer = Some(serializer))
 
       def memberFor(priority: Priority) = {
         val ranges = ResolvedServiceMember(service, token).ranges
@@ -472,7 +475,7 @@ object LogQueue {
         txLog.getLastLoggedRecord match {
           case Some(record: TimestampedRecord) => {
             // Not ended by an Index record. We need to rewrite the log tail to find the last record timestamp.
-            val recovery = new ConsistencyRecovery(txLog.logDir, DummyTruncatableConsistentStore)
+            val recovery = new ConsistencyRecovery(txLog.logDir, DummyTruncatableConsistentStore, Some(serializer))
             recovery.rewriteFromRecord(record, txLog, memberFor(priority))
           }
           case Some(_: Index) => // Nothing to do, the log is ended by an Index record!!!
