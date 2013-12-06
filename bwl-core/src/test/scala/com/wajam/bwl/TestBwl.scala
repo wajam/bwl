@@ -109,7 +109,7 @@ class TestBwl extends FunSuite {
     })
   }
 
-  test("queue callbackTimeout should be used when defined") {
+  test("a zero queue callbackTimeout should override a non-zero responseTimeout") {
     implicit val spyQueueFactory = new SpyQueueFactory(memoryQueueFactory)
 
     // Ensure timeout with a zero value
@@ -126,6 +126,34 @@ class TestBwl extends FunSuite {
       val spyQueue = spyQueueFactory.allQueues.head
 
       verify(spyQueue, timeout(500).never()).ack(anyObject())
+    })
+  }
+
+  test("a non-zero queue callbackTimeout should override a zero responseTimeout") {
+    implicit val spyQueueFactory = new SpyQueueFactory(memoryQueueFactory)
+
+    // Set a reasonable timeout at the queue level
+    val callbackTimeout = 2000L
+
+    new OkCallbackFixture with BwlFixture with SinglePriorityQueueFixture {
+      override def definitions = super.definitions.map(_.copy(callbackTimeout = Some(callbackTimeout)))
+    }.runWithFixture((f) => {
+      import ExecutionContext.Implicits.global
+
+      // Set a zero timeout at the service level
+      f.bwl.applySupport(responseTimeout = Some(0))
+
+      f.bwl.enqueue(0, f.definitions.head.name, "hello")
+      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))
+
+      val spyQueue = spyQueueFactory.allQueues.head
+      val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
+      val ackCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Ack])
+      verify(spyQueue, timeout(2000)).enqueue(taskCaptor.capture())
+      taskCaptor.getAllValues.size() should be(1)
+
+      verify(spyQueue, timeout(2000)).ack(ackCaptor.capture())
+      ackCaptor.getAllValues.size() should be(1)
     })
   }
 
