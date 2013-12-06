@@ -92,23 +92,25 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
     result.map(_ => Unit)
   }
 
+  // Use the timeout set in definition, if any, otherwise fallback on the service responseTimeout
+  def getCallbackTimeout(definition: QueueDefinition): Long = definition.callbackTimeout.getOrElse(responseTimeout)
+
   private def createQueueWrapper(member: ServiceMember, definition: QueueDefinition): QueueWrapper = {
     val queue = queueFactory.createQueue(member.token, definition, this)
     val persistence = taskPersistenceFactory.createServiceMemberPersistence(this, member)
 
-    // TODO: allow per queue timeout???
-    val taskAction = new TaskAction(s"${serviceName}_${definition.name}_${member.token}", queueCallbackAdapter(definition), responseTimeout)
+    val taskAction = new TaskAction(s"${serviceName}_${definition.name}_${member.token}", queueCallbackAdapter(definition), getCallbackTimeout(definition))
     val task = new Task(queue.feeder, taskAction, persistence, queue.definition.taskContext, random)
 
     QueueWrapper(queue, task)
   }
 
-  // Compute the elapsed time after which a callback does not result to a task acknowledgement even if successful.
-  // After that duration, it is assumed that SPNL has already timed out and scheduled a retry for the task.
-  private def callbackTimeout = math.max(responseTimeout * 0.75, responseTimeout - 500)
-
   private def queueCallbackAdapter(definition: QueueDefinition)(request: SpnlRequest) {
     import QueueResource._
+
+    // Compute the elapsed time after which a callback does not result to a task acknowledgement even if successful.
+    // After that duration, it is assumed that SPNL has already timed out and scheduled a retry for the task.
+    val callbackTimeout = math.max(getCallbackTimeout(definition) * 0.75, getCallbackTimeout(definition) - 500)
 
     // Load metrics for this queue
     val metrics = metricsPerQueue(definition.name)

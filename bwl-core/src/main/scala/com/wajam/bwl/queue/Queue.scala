@@ -17,7 +17,8 @@ class PrioritySelector(priorities: Iterable[Priority])(implicit random: Random =
 
 case class QueueDefinition(name: String, callback: QueueCallback, taskContext: TaskContext = new TaskContext,
                            priorities: Iterable[Priority] = Seq(Priority(1, weight = 1)),
-                           maxRetryCount: Option[Int] = None)
+                           maxRetryCount: Option[Int] = None,
+                           callbackTimeout: Option[Long] = None)
 
 sealed trait QueueItem {
   def itemId: Timestamp

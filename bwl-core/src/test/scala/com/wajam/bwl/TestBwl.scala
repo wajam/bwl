@@ -7,7 +7,7 @@ import com.wajam.bwl.queue._
 import scala.concurrent.{ Future, Await, ExecutionContext }
 import scala.concurrent.duration._
 import org.scalatest.matchers.ShouldMatchers._
-import org.mockito.Matchers.{ eq => argEquals }
+import org.mockito.Matchers.{ eq => argEquals, anyObject }
 import org.mockito.Mockito._
 import org.mockito.ArgumentCaptor
 import scala.collection.JavaConversions._
@@ -106,6 +106,26 @@ class TestBwl extends FunSuite {
       Thread.sleep(500)
       verify(spyQueue, never()).ack(ackCaptor.capture())
       ackCaptor.getAllValues.size() should be(0)
+    })
+  }
+
+  test("queue callbackTimeout should be used when defined") {
+    implicit val spyQueueFactory = new SpyQueueFactory(memoryQueueFactory)
+
+    // Ensure timeout with a zero value
+    val callbackTimeout = 0L
+
+    new OkCallbackFixture with BwlFixture with SinglePriorityQueueFixture {
+      override def definitions = super.definitions.map(_.copy(callbackTimeout = Some(callbackTimeout)))
+    }.runWithFixture((f) => {
+      import ExecutionContext.Implicits.global
+
+      f.bwl.enqueue(0, f.definitions.head.name, "hello")
+      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))
+
+      val spyQueue = spyQueueFactory.allQueues.head
+
+      verify(spyQueue, timeout(500).never()).ack(anyObject())
     })
   }
 
