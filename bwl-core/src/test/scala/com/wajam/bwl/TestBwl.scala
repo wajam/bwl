@@ -112,10 +112,12 @@ class TestBwl extends FunSuite {
   test("a zero queue callbackTimeout should override a non-zero responseTimeout") {
     implicit val spyQueueFactory = new SpyQueueFactory(memoryQueueFactory)
 
+    // Set a meaningful callback delay
+    val callbackDelay = 100L
     // Ensure timeout with a zero value
     val callbackTimeout = 0L
 
-    new OkCallbackFixture with BwlFixture with SinglePriorityQueueFixture {
+    new OkCallbackFixture(callbackDelay) with BwlFixture with SinglePriorityQueueFixture {
       override def definitions = super.definitions.map(_.copy(callbackTimeout = Some(callbackTimeout)))
     }.runWithFixture((f) => {
       import ExecutionContext.Implicits.global
@@ -132,10 +134,12 @@ class TestBwl extends FunSuite {
   test("a non-zero queue callbackTimeout should override a zero responseTimeout") {
     implicit val spyQueueFactory = new SpyQueueFactory(memoryQueueFactory)
 
+    // Set a meaningful callback delay
+    val callbackDelay = 100L
     // Set a reasonable timeout at the queue level
     val callbackTimeout = 2000L
 
-    new OkCallbackFixture with BwlFixture with SinglePriorityQueueFixture {
+    new OkCallbackFixture(callbackDelay) with BwlFixture with SinglePriorityQueueFixture {
       override def definitions = super.definitions.map(_.copy(callbackTimeout = Some(callbackTimeout)))
     }.runWithFixture((f) => {
       import ExecutionContext.Implicits.global
