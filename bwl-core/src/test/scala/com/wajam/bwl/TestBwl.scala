@@ -7,7 +7,7 @@ import com.wajam.bwl.queue._
 import scala.concurrent.{ Future, Await, ExecutionContext }
 import scala.concurrent.duration._
 import org.scalatest.matchers.ShouldMatchers._
-import org.mockito.Matchers.{ eq => argEquals }
+import org.mockito.Matchers.{ eq => argEquals, anyObject }
 import org.mockito.Mockito._
 import org.mockito.ArgumentCaptor
 import scala.collection.JavaConversions._
@@ -106,6 +106,58 @@ class TestBwl extends FunSuite {
       Thread.sleep(500)
       verify(spyQueue, never()).ack(ackCaptor.capture())
       ackCaptor.getAllValues.size() should be(0)
+    })
+  }
+
+  test("a zero queue callbackTimeout should override a non-zero responseTimeout") {
+    implicit val spyQueueFactory = new SpyQueueFactory(memoryQueueFactory)
+
+    // Set a meaningful callback delay
+    val callbackDelay = 100L
+    // Ensure timeout with a zero value
+    val callbackTimeout = 0L
+
+    new OkCallbackFixture(callbackDelay) with BwlFixture with SinglePriorityQueueFixture {
+      override def definitions = super.definitions.map(_.copy(callbackTimeout = Some(callbackTimeout)))
+    }.runWithFixture((f) => {
+      import ExecutionContext.Implicits.global
+
+      f.bwl.enqueue(0, f.definitions.head.name, "hello")
+      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))
+
+      val spyQueue = spyQueueFactory.allQueues.head
+
+      verify(spyQueue, timeout(500).never()).ack(anyObject())
+    })
+  }
+
+  test("a non-zero queue callbackTimeout should override a zero responseTimeout") {
+    implicit val spyQueueFactory = new SpyQueueFactory(memoryQueueFactory)
+
+    // Set a meaningful callback delay
+    val callbackDelay = 100L
+    // Set a reasonable timeout at the queue level
+    val callbackTimeout = 2000L
+
+    new OkCallbackFixture(callbackDelay) with BwlFixture with SinglePriorityQueueFixture {
+      override def definitions = super.definitions.map(_.copy(callbackTimeout = Some(callbackTimeout)))
+    }.runWithFixture((f) => {
+      import ExecutionContext.Implicits.global
+
+      // Set a zero timeout at the service level
+      f.bwl.applySupport(responseTimeout = Some(0))
+
+      f.bwl.enqueue(0, f.definitions.head.name, "hello")
+      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))
+
+      val spyQueue = spyQueueFactory.allQueues.head
+      val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
+      val ackCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Ack])
+      verify(spyQueue, timeout(2000)).enqueue(taskCaptor.capture())
+      taskCaptor.getAllValues.size() should be(1)
+
+      verify(spyQueue, timeout(2000)).ack(ackCaptor.capture())
+      ackCaptor.getAllValues.size() should be(1)
     })
   }
 
