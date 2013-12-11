@@ -10,7 +10,7 @@ import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.spnl.feeder.Feeder
 import com.wajam.spnl.feeder.Feeder._
 import com.wajam.spnl.TaskContext
-import com.wajam.bwl.utils.{ QueueMetrics, PeekIterator, DelayedTaskIterator }
+import com.wajam.bwl.utils.{ PrioritizedIterator, QueueMetrics, PeekIterator, DelayedTaskIterator }
 import com.wajam.bwl.queue._
 import com.wajam.bwl.QueueResource._
 import com.wajam.bwl.queue.QueueDefinition
@@ -25,10 +25,13 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
 
   private val selector = new PrioritySelector(priorities)
   private val queues = priorities.map(_.value -> new ConcurrentLinkedQueue[QueueItem.Task]).toMap
+  private val queuesIterators = queues.map {
+    case (priority, queue) =>
+      priority -> Iterator.continually(Option(queue.poll()))
+  }
   private var pendingTasks: Map[Timestamp, QueueItem.Task] = TreeMap()
 
-  private val delayedTaskIterator = new DelayedTaskIterator(
-    Iterator.continually(queues(selector.next).poll()).map(Option(_)), clock)
+  private val delayedTaskIterator = new DelayedTaskIterator(new PrioritizedIterator(queuesIterators, definition.priorities), clock)
 
   private val taskIterator = PeekIterator(delayedTaskIterator)
 
