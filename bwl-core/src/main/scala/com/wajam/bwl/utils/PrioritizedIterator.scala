@@ -32,6 +32,9 @@ class PrioritizedIterator(iteratorsByPriority: Map[Int, Iterator[Option[QueueIte
           case Nil =>
             // All priorities have been tried, return None
             None
+          case single :: Nil =>
+            // Only one priority left, no need to create a selector
+            iteratorsByPriority(single.value).next()
           case reducedPriorities: Iterable[Priority] =>
             // Create a new selector with the reduced set of priorities
             val reducedSelector = new PrioritySelector(reducedPriorities)
