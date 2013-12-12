@@ -141,7 +141,7 @@ class TestLogQueueFeeder extends FlatSpec with MockitoSugar {
 
       def answer(iom: InvocationOnMock) = {
         callsCount += 1
-        None
+        someTask(0L, priority)
       }
     }
 

@@ -101,8 +101,8 @@ class TestMemoryQueue extends FlatSpec with MockitoSugar {
     // take(99) results to 100 `next()` calls because feeder is peekable and reads one task ahead
     val items = queue.feeder.take(99).toList.flatten
 
-    items.count(_("data") == 1) should be(62)
-    items.count(_("data") == 2) should be(36)
+    items.count(_("data") == 1) should be(63)
+    items.count(_("data") == 2) should be(35)
   }
 
   it should "respect delayed tasks order" in new WithQueue {

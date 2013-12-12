@@ -18,7 +18,6 @@ import scala.util.Random
 class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Option[Timestamp]) => PriorityTaskItemReader)(implicit metrics: DelayedTaskMetrics, random: Random = Random, timer: CurrentTime = new CurrentTime {})
     extends Feeder {
 
-  private val selector = new PrioritySelector(definition.priorities)
   private var readers: Map[Int, PriorityTaskItemReader] = Map()
   private var delayedTaskIterator: DelayedTaskIterator = new DelayedTaskIterator(Iterator(), timer)
 
@@ -45,7 +44,7 @@ class LogQueueFeeder(definition: QueueDefinition, createPriorityReader: (Int, Op
     readers = trackers.map {
       case (priority, tracker) => priority -> createPriorityReader(priority, tracker.oldestItemId)
     }.toMap
-    delayedTaskIterator = new DelayedTaskIterator(Iterator.continually(readers(selector.next).next()), timer)
+    delayedTaskIterator = new DelayedTaskIterator(new PrioritizedIterator(readers, definition.priorities), timer)
     taskIterator = PeekIterator(delayedTaskIterator)
   }
 
