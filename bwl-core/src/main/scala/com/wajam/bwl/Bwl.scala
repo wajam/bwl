@@ -13,8 +13,10 @@ import com.wajam.commons.Logging
 import scala.util.Random
 import com.yammer.metrics.scala.{ Timer, Counter, Instrumented }
 import com.yammer.metrics.core.Gauge
+import com.wajam.tracing.{ TracingExecutionContext, Tracer }
 
-class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefinition], protected val queueFactory: QueueFactory,
+class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefinition],
+          protected val queueFactory: QueueFactory, callbackExecutor: ExecutionContext,
           spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)(implicit random: Random = Random)
     extends Service(serviceName) with Logging {
 
@@ -116,15 +118,7 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
     val metrics = metricsPerQueue(definition.name)
     import metrics._
 
-    implicit val sameThreadExecutionContext = new ExecutionContext {
-      def execute(runnable: Runnable) {
-        runnable.run()
-      }
-
-      def reportFailure(t: Throwable) {
-        log.error("Failure in BWL queue future callback: " + t)
-      }
-    }
+    implicit val ec = new TracingExecutionContext(callbackExecutor)
 
     val data = request.message.getData[TaskData]
     val taskToken = data.token

@@ -48,8 +48,8 @@ class DemoResource(bwl: Bwl, definitions: Iterable[QueueDefinition])(implicit ec
 
 object DemoResource {
 
-  class DemoCallback(name: String, delay: Long = 0)(implicit ec: ExecutionContext) extends QueueCallback with Logging {
-    def execute(data: Any) = {
+  class DemoCallback(name: String, delay: Long = 0) extends QueueCallback with Logging {
+    def execute(data: Any)(implicit ec: ExecutionContext) = {
       import scala.concurrent._
       future {
         Thread.sleep(delay)
