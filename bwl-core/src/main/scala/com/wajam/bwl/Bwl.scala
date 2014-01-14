@@ -57,11 +57,30 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
 
   def queueViews(serviceName: String): Iterable[QueueView] = queues.valuesIterator.map { wrapper =>
     new QueueView {
+
+      def token = wrapper.queue.token
+
       def name = wrapper.queue.name
 
       def priorities = wrapper.queue.priorities
 
       def stats = wrapper.queue.stats
+
+      def rates = new QueueRates {
+
+        private val spnlName = name + "_" + token
+
+        private val spnlTask = spnl.scheduler.tasks.find(t => t.realTask.name == spnlName)
+
+        def currentRate = spnlTask.map(_.lastRate).getOrElse(0.0)
+
+        def normalRate: Double = spnlTask.map(_.realTask.context.normalRate).getOrElse(0.0)
+
+        def throttleRate : Double = spnlTask.map(_.realTask.context.throttleRate).getOrElse(0.0)
+
+        def concurrency: Int = spnlTask.map(_.realTask.context.maxConcurrent).getOrElse(0)
+
+      }
     }
   }.toIterable
 
@@ -208,7 +227,7 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
     // Build queues for each queue definition and local service member pair
     // TODO: Creates/deletes queues when service members goes Up/Down
     val localMembers = members.filter(m => cluster.isLocalNode(m.node)).toList
-    internalQueues = definitions.flatMap(d => localMembers.map(m => (m.token, d.name) -> createQueueWrapper(m, d))).toMap
+    internalQueues = definitions.flatMap(d => localMembers.map(m => ((m.token, d.name) ->  createQueueWrapper(m, d)))).toMap
     internalQueues.valuesIterator.foreach(_.start())
   }
 
