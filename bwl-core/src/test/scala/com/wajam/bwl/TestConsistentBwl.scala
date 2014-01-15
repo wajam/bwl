@@ -10,6 +10,7 @@ import org.scalatest.matchers.ShouldMatchers._
 import com.wajam.bwl.queue.QueueItem
 import com.wajam.nrv.data.InMessage
 import com.wajam.nrv.consistency.ResolvedServiceMember
+import org.mockito.Matchers._
 
 @RunWith(classOf[JUnitRunner])
 class TestConsistentBwl extends FlatSpec {
@@ -65,7 +66,7 @@ class TestConsistentBwl extends FlatSpec {
       val mp2 = f.bwl.enqueue(2L, f.definitions(1).name, "multiple-p2", priority = Some(2))
 
       val dataCaptor = ArgumentCaptor.forClass(classOf[String])
-      verify(f.mockCallback, timeout(2000).times(3)).execute(dataCaptor.capture())
+      verify(f.mockCallback, timeout(2000).times(3)).execute(dataCaptor.capture())(anyObject())
 
       // When we are here, the 3 enqueue Tasks are written in the log and processed but we need to wait a bit more
       // to ensure their Ack are also written in the logs.

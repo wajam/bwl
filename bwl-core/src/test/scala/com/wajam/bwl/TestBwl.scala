@@ -12,6 +12,7 @@ import org.mockito.Mockito._
 import org.mockito.ArgumentCaptor
 import scala.collection.JavaConversions._
 import scala.util.Random
+import com.wajam.tracing.{ Annotation, TraceContext, Record }
 
 @RunWith(classOf[JUnitRunner])
 class TestBwl extends FunSuite {
@@ -25,7 +26,7 @@ class TestBwl extends FunSuite {
         import ExecutionContext.Implicits.global
 
         f.bwl.enqueue(0, f.definitions.head.name, "hello")
-        verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))
+        verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))(anyObject())
         verifyNoMoreInteractions(f.mockCallback)
       })
     }
@@ -46,7 +47,7 @@ class TestBwl extends FunSuite {
         Await.result(Future.sequence(enqueued), 5.seconds)
 
         val dataCaptor = ArgumentCaptor.forClass(classOf[Map[String, Any]])
-        verify(f.mockCallback, timeout(5000).atLeast(100)).execute(dataCaptor.capture())
+        verify(f.mockCallback, timeout(5000).atLeast(100)).execute(dataCaptor.capture())(anyObject())
 
         val values = dataCaptor.getAllValues.toList.take(100)
         val p1Count = values.map(_("p")).count(_ == 1)
@@ -71,7 +72,7 @@ class TestBwl extends FunSuite {
       import ExecutionContext.Implicits.global
 
       f.bwl.enqueue(0, f.definitions.head.name, "hello")
-      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))
+      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))(anyObject())
 
       val spyQueue = spyQueueFactory.allQueues.head
       val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -81,6 +82,12 @@ class TestBwl extends FunSuite {
 
       verify(spyQueue, timeout(2000)).ack(ackCaptor.capture())
       ackCaptor.getAllValues.size() should be(1)
+
+      val recorderCaptor = ArgumentCaptor.forClass(classOf[Record])
+      verify(f.mockTraceRecorder, atLeastOnce()).record(recorderCaptor.capture())
+      val records = recorderCaptor.getAllValues.toList
+      val messages = records.collect { case Record(_, _, msg: Annotation.Message, _) => msg }
+      messages.size should be(1)
     })
   }
 
@@ -94,7 +101,7 @@ class TestBwl extends FunSuite {
       f.bwl.applySupport(responseTimeout = Some(200L))
 
       f.bwl.enqueue(0, f.definitions.head.name, "hello")
-      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))
+      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))(anyObject())
 
       val spyQueue = spyQueueFactory.allQueues.head
       val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -106,6 +113,12 @@ class TestBwl extends FunSuite {
       Thread.sleep(500)
       verify(spyQueue, never()).ack(ackCaptor.capture())
       ackCaptor.getAllValues.size() should be(0)
+
+      val recorderCaptor = ArgumentCaptor.forClass(classOf[Record])
+      verify(f.mockTraceRecorder, atLeastOnce()).record(recorderCaptor.capture())
+      val records = recorderCaptor.getAllValues.toList
+      val messages = records.collect { case Record(_, _, msg: Annotation.Message, Some(dur)) if dur >= 300L => msg }
+      messages.size should be(1)
     })
   }
 
@@ -123,7 +136,7 @@ class TestBwl extends FunSuite {
       import ExecutionContext.Implicits.global
 
       f.bwl.enqueue(0, f.definitions.head.name, "hello")
-      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))
+      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))(anyObject())
 
       val spyQueue = spyQueueFactory.allQueues.head
 
@@ -148,7 +161,7 @@ class TestBwl extends FunSuite {
       f.bwl.applySupport(responseTimeout = Some(0))
 
       f.bwl.enqueue(0, f.definitions.head.name, "hello")
-      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))
+      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))(anyObject())
 
       val spyQueue = spyQueueFactory.allQueues.head
       val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -177,7 +190,7 @@ class TestBwl extends FunSuite {
         import ExecutionContext.Implicits.global
 
         f.bwl.enqueue(0, f.definitions.head.name, "hello")
-        verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))
+        verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))(anyObject())
 
         val spyQueue = spyQueueFactory.allQueues.head
         val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -188,6 +201,12 @@ class TestBwl extends FunSuite {
         Thread.sleep(100)
         verify(spyQueue, never()).ack(ackCaptor.capture())
         ackCaptor.getAllValues.size() should be(0)
+
+        val recorderCaptor = ArgumentCaptor.forClass(classOf[Record])
+        verify(f.mockTraceRecorder, atLeastOnce()).record(recorderCaptor.capture())
+        val records = recorderCaptor.getAllValues.toList
+        val messages = records.collect { case Record(_, _, msg: Annotation.Message, _) => msg }
+        messages.size should be(1)
       })
     }
 
@@ -200,7 +219,7 @@ class TestBwl extends FunSuite {
         import ExecutionContext.Implicits.global
 
         f.bwl.enqueue(0, f.definitions.head.name, "hello")
-        verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))
+        verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))(anyObject())
 
         val spyQueue = spyQueueFactory.allQueues.head
         val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -210,6 +229,12 @@ class TestBwl extends FunSuite {
 
         verify(spyQueue, timeout(2000)).ack(ackCaptor.capture())
         ackCaptor.getAllValues.size() should be(1)
+
+        val recorderCaptor = ArgumentCaptor.forClass(classOf[Record])
+        verify(f.mockTraceRecorder, atLeastOnce()).record(recorderCaptor.capture())
+        val records = recorderCaptor.getAllValues.toList
+        val messages = records.collect { case Record(_, _, msg: Annotation.Message, _) => msg }
+        messages.size should be(1)
       })
     }
 
@@ -224,7 +249,7 @@ class TestBwl extends FunSuite {
         f.bwl.applySupport(responseTimeout = Some(200L))
 
         f.bwl.enqueue(0, f.definitions.head.name, "hello")
-        verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))
+        verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))(anyObject())
 
         val spyQueue = spyQueueFactory.allQueues.head
         val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -236,6 +261,12 @@ class TestBwl extends FunSuite {
         Thread.sleep(500)
         verify(spyQueue, never()).ack(ackCaptor.capture())
         ackCaptor.getAllValues.size() should be(0)
+
+        val recorderCaptor = ArgumentCaptor.forClass(classOf[Record])
+        verify(f.mockTraceRecorder, atLeastOnce()).record(recorderCaptor.capture())
+        val records = recorderCaptor.getAllValues.toList
+        val messages = records.collect { case Record(_, _, msg: Annotation.Message, Some(dur)) if dur >= 300L => msg }
+        messages.size should be(1)
       })
     }
 
@@ -254,7 +285,7 @@ class TestBwl extends FunSuite {
         f.bwl.enqueue(0, f.definitions.head.name, "hello")
 
         // SPNL would retry forever but we stop waiting after the fifth callback invocation
-        verify(f.mockCallback, timeout(2000).atLeast(5)).execute(ArgumentCaptor.forClass(classOf[String]).capture())
+        verify(f.mockCallback, timeout(2000).atLeast(5)).execute(ArgumentCaptor.forClass(classOf[String]).capture())(anyObject())
 
         val spyQueue = spyQueueFactory.allQueues.head
         val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -265,6 +296,12 @@ class TestBwl extends FunSuite {
         // Ensure the task is never acknowledged
         verify(spyQueue, never()).ack(ackCaptor.capture())
         ackCaptor.getAllValues.size() should be(0)
+
+        val recorderCaptor = ArgumentCaptor.forClass(classOf[Record])
+        verify(f.mockTraceRecorder, atLeastOnce()).record(recorderCaptor.capture())
+        val records = recorderCaptor.getAllValues.toList
+        val messages = records.collect { case Record(_, _, msg: Annotation.Message, _) => msg }
+        messages.size should be >= 5
       })
 
     }
@@ -287,7 +324,7 @@ class TestBwl extends FunSuite {
         import ExecutionContext.Implicits.global
 
         f.bwl.enqueue(0, f.definitions.head.name, "hello")
-        verify(f.mockCallback, timeout(2000).times(1 + maxRetryCount)).execute(argEquals("hello"))
+        verify(f.mockCallback, timeout(2000).times(1 + maxRetryCount)).execute(argEquals("hello"))(anyObject())
 
         val spyQueue = spyQueueFactory.allQueues.head
         val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -297,6 +334,12 @@ class TestBwl extends FunSuite {
 
         verify(spyQueue, timeout(2000)).ack(ackCaptor.capture())
         ackCaptor.getAllValues.size() should be(1)
+
+        val recorderCaptor = ArgumentCaptor.forClass(classOf[Record])
+        verify(f.mockTraceRecorder, atLeastOnce()).record(recorderCaptor.capture())
+        val records = recorderCaptor.getAllValues.toList
+        val messages = records.collect { case Record(_, _, msg: Annotation.Message, _) => msg }
+        messages.size should be(1 + maxRetryCount)
       })
     }
 
@@ -319,7 +362,7 @@ class TestBwl extends FunSuite {
         f.bwl.enqueue(0, f.definitions.head.name, data, Some(priority))
 
         // Wait for the callback to be executed
-        verify(f.mockCallback, timeout(2000)).execute(ArgumentCaptor.forClass(classOf[String]).capture())
+        verify(f.mockCallback, timeout(2000)).execute(ArgumentCaptor.forClass(classOf[String]).capture())(anyObject())
 
         val spyQueue = spyQueueFactory.allQueues.head
         val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -358,7 +401,7 @@ class TestBwl extends FunSuite {
 
         val stringCaptor = ArgumentCaptor.forClass(classOf[String])
 
-        verify(f.mockCallback, timeout(2000).times(2)).execute(stringCaptor.capture())
+        verify(f.mockCallback, timeout(2000).times(2)).execute(stringCaptor.capture())(anyObject())
 
         stringCaptor.getAllValues.toList should be(List("hello", "good bye"))
       })

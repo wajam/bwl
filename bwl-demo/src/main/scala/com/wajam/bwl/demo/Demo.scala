@@ -145,7 +145,7 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
       config.getBwlPersistentQueueCleanFrequency)
 
     val bwlSpnl = new Spnl()
-    val service = new Bwl("bwl", definitions, queueFactory, bwlSpnl, spnlPersistenceFactory) with ConsistentBwl with DemoBwlService {
+    val service = new Bwl("bwl", definitions, queueFactory, ec, bwlSpnl, spnlPersistenceFactory) with ConsistentBwl with DemoBwlService {
       val spnl: Spnl = bwlSpnl
     }
     service.applySupport(responseTimeout = Some(config.getBwlTaskTimeout), nrvCodec = Some(StringCodec))

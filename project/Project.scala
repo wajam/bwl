@@ -21,6 +21,7 @@ object BwlBuild extends Build {
 
   val commonDeps = Seq(
     "com.wajam" %% "commons-core" % "0.1-SNAPSHOT",
+    "com.wajam" %% "commons-tracing" % "0.1-SNAPSHOT",
     "com.wajam" %% "nrv-core" % "0.1-SNAPSHOT",
     "com.wajam" %% "nrv-extension" % "0.1-SNAPSHOT",
     "com.wajam" %% "spnl-core" % "0.1-SNAPSHOT",

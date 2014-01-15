@@ -19,6 +19,7 @@ import org.mockito.Matchers._
 import com.wajam.bwl.queue.QueueDefinition
 import org.mockito.stubbing.Answer
 import org.mockito.invocation.InvocationOnMock
+import com.wajam.tracing.{ TraceRecorder, LoggingTraceRecorder, Tracer }
 
 trait BwlFixture extends CallbackFixture with MockitoSugar {
 
@@ -26,6 +27,7 @@ trait BwlFixture extends CallbackFixture with MockitoSugar {
 
   var bwl: Bwl = null
   var cluster: Cluster = null
+  val mockTraceRecorder: TraceRecorder = mock[TraceRecorder]
 
   val localNode = new LocalNode("localhost", Map("nrv" -> 40373))
   val localMember: ServiceMember = new ServiceMember(TokenRange.MaxToken / 2, localNode)
@@ -34,7 +36,7 @@ trait BwlFixture extends CallbackFixture with MockitoSugar {
   def definitions: Seq[QueueDefinition]
 
   def createBwlService(queueFactory: FixtureQueueFactory)(implicit random: Random = Random) = {
-    new Bwl("bwl", definitions, queueFactory.factory, new Spnl)
+    new Bwl("bwl", definitions, queueFactory.factory, ExecutionContext.global, new Spnl)
   }
 
   def runWithFixture(test: (BwlFixture) => Any)(implicit queueFactory: FixtureQueueFactory, random: Random = Random) {
@@ -43,6 +45,7 @@ trait BwlFixture extends CallbackFixture with MockitoSugar {
 
       val manager = new StaticClusterManager
       cluster = new Cluster(localNode, manager)
+      cluster.applySupport(tracer = Some(new Tracer(mockTraceRecorder)))
 
       val protocol = new NrvProtocol(cluster.localNode, 5000, 100)
       cluster.registerProtocol(protocol, default = true)
@@ -61,6 +64,7 @@ trait BwlFixture extends CallbackFixture with MockitoSugar {
       cluster.stop()
       cluster = null
       bwl = null
+      reset(mockTraceRecorder)
       queueFactory.after()
     }
   }
@@ -73,7 +77,7 @@ trait ConsistentBwlFixture extends BwlFixture {
   def consistentBwl: ConsistentBwl = bwl.asInstanceOf[ConsistentBwl]
 
   override def createBwlService(queueFactory: FixtureQueueFactory)(implicit random: Random = Random) = {
-    new Bwl("consistent-bwl", definitions, queueFactory.factory, new Spnl) with ConsistentBwl
+    new Bwl("consistent-bwl", definitions, queueFactory.factory, ExecutionContext.global, new Spnl) with ConsistentBwl
   }
 
   def runWithConsistentFixture(test: (ConsistentBwlFixture) => Any)(implicit queueFactory: FixtureQueueFactory, random: Random = Random) {
@@ -150,13 +154,18 @@ trait CallbackFixture extends MockitoSugar {
 
   def delay: Long
 
-  when(mockCallback.execute(anyObject())).thenAnswer(new Answer[Future[QueueCallback.Result]] {
+  when(mockCallback.execute(anyObject())(anyObject())).thenAnswer(new Answer[Future[QueueCallback.Result]] {
     import scala.concurrent.future
-    import ExecutionContext.Implicits.global
 
-    def answer(iom: InvocationOnMock) = future {
-      Thread.sleep(delay)
-      result
+    def answer(iom: InvocationOnMock) = {
+      val args = iom.getArguments
+      implicit val ec = args(1).asInstanceOf[ExecutionContext]
+      future {
+        Tracer.currentTracer.get.time("****: CallbackFixture.execute") {
+          Thread.sleep(delay)
+          result
+        }
+      }
     }
   })
 }

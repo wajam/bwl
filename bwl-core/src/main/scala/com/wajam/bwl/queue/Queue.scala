@@ -5,7 +5,7 @@ import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.bwl.utils.{ PeekIteratorOrdering, WeightedItemsSelector }
 import com.wajam.nrv.service.Service
 import com.wajam.spnl.TaskContext
-import scala.concurrent.Future
+import scala.concurrent.{ ExecutionContext, Future }
 import com.wajam.spnl.feeder.Feeder.FeederData
 import language.implicitConversions
 import scala.util.Random
@@ -116,7 +116,7 @@ trait QueueFactory {
 }
 
 trait QueueCallback {
-  def execute(data: Any): Future[QueueCallback.Result]
+  def execute(data: Any)(implicit ec: ExecutionContext): Future[QueueCallback.Result]
 }
 
 object QueueCallback {
