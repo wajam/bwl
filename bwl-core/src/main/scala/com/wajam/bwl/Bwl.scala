@@ -70,9 +70,9 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
 
       def rates = new QueueRates {
 
-        private val spnlName = name + "_" + token
+        private val spnlName = service.name  + "_" + name + "_" + token
 
-        private val spnlTask = spnl.scheduler.tasks.find(t => t.realTask.name == spnlName)
+        private val spnlTask = spnl.scheduler.tasks.find(t => t.realTask.action.name == spnlName)
 
         def currentRate = spnlTask.map(_.lastRate).getOrElse(0.0)
 
