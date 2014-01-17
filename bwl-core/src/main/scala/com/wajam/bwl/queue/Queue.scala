@@ -64,13 +64,28 @@ trait QueueStats {
   def delayedTasks: Iterable[QueueItem.Task]
 }
 
+trait QueueRates {
+
+  def currentRate: Double
+
+  def normalRate: Double
+
+  def throttleRate : Double
+
+  def concurrency: Int
+}
+
 trait QueueView {
+
+  def token: Long
 
   def name: String
 
   def priorities: Iterable[Priority]
 
   def stats: QueueStats
+
+  def rates: QueueRates
 }
 
 trait Queue {
