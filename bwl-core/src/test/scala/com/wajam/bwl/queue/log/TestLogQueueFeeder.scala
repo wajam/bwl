@@ -3,7 +3,7 @@ package com.wajam.bwl.queue.log
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
 import org.scalatest.FlatSpec
-import org.scalatest.matchers.ShouldMatchers._
+import org.scalatest.Matchers._
 import org.scalatest.mock.MockitoSugar
 import org.mockito.Mockito._
 import com.wajam.bwl.queue._

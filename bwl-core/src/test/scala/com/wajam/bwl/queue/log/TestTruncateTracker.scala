@@ -6,7 +6,7 @@ import org.scalatest.FlatSpec
 import java.io.{ PrintWriter, FileOutputStream, File }
 import java.nio.file.Files
 import org.apache.commons.io.FileUtils
-import org.scalatest.matchers.ShouldMatchers._
+import org.scalatest.Matchers._
 import scala.util.Random
 
 @RunWith(classOf[JUnitRunner])

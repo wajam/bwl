@@ -70,7 +70,7 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
 
       def rates = new QueueRates {
 
-        private val spnlName = service.name  + "_" + name + "_" + token
+        private val spnlName = service.name + "_" + name + "_" + token
 
         private val spnlTask = spnl.scheduler.tasks.find(t => t.realTask.action.name == spnlName)
 
@@ -78,7 +78,7 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
 
         def normalRate: Double = spnlTask.map(_.realTask.context.normalRate).getOrElse(0.0)
 
-        def throttleRate : Double = spnlTask.map(_.realTask.context.throttleRate).getOrElse(0.0)
+        def throttleRate: Double = spnlTask.map(_.realTask.context.throttleRate).getOrElse(0.0)
 
         def concurrency: Int = spnlTask.map(_.realTask.context.maxConcurrent).getOrElse(0)
 

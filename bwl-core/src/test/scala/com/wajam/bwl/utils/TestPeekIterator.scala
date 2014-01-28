@@ -3,7 +3,7 @@ package com.wajam.bwl.utils
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
 import org.scalatest.FlatSpec
-import org.scalatest.matchers.ShouldMatchers._
+import org.scalatest.Matchers._
 import java.util.NoSuchElementException
 import org.scalatest.mock.MockitoSugar
 import org.mockito.Mockito._
