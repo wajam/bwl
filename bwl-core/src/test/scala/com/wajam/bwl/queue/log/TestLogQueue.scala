@@ -12,7 +12,7 @@ import org.apache.commons.io.FileUtils
 import com.wajam.bwl.queue._
 import org.scalatest.mock.MockitoSugar
 import com.wajam.nrv.consistency.ConsistencyOne
-import org.scalatest.matchers.ShouldMatchers._
+import org.scalatest.Matchers._
 import com.wajam.bwl.queue.Priority
 import com.wajam.bwl.queue.QueueDefinition
 import com.wajam.bwl.BwlTestHelper._

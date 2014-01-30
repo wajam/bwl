@@ -8,7 +8,7 @@ import java.io.File
 import java.nio.file.Files
 import org.apache.commons.io.FileUtils
 import com.wajam.nrv.utils.timestamp.Timestamp
-import org.scalatest.matchers.ShouldMatchers._
+import org.scalatest.Matchers._
 import com.wajam.nrv.data.{ OutMessage, Message, MessageType, InMessage }
 import com.wajam.nrv.consistency.log.LogRecord.Index
 import scala.util.Random

@@ -70,7 +70,7 @@ trait QueueRates {
 
   def normalRate: Double
 
-  def throttleRate : Double
+  def throttleRate: Double
 
   def concurrency: Int
 }

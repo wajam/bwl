@@ -4,7 +4,7 @@ import scala.collection.immutable.List
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
 import org.scalatest.FlatSpec
-import org.scalatest.matchers.ShouldMatchers._
+import org.scalatest.Matchers._
 import com.wajam.commons.{ CurrentTime, ControlableCurrentTime }
 import com.wajam.bwl.queue.QueueItem
 

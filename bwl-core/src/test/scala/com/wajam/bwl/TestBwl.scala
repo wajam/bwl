@@ -6,7 +6,7 @@ import org.scalatest.junit.JUnitRunner
 import com.wajam.bwl.queue._
 import scala.concurrent.{ Future, Await, ExecutionContext }
 import scala.concurrent.duration._
-import org.scalatest.matchers.ShouldMatchers._
+import org.scalatest.Matchers._
 import org.mockito.Matchers.{ eq => argEquals, anyObject }
 import org.mockito.Mockito._
 import org.mockito.ArgumentCaptor

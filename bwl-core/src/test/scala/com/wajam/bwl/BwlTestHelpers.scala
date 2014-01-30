@@ -5,7 +5,7 @@ import com.wajam.commons.Closable
 import com.wajam.spnl.feeder.Feeder.FeederData
 import language.implicitConversions
 import com.wajam.bwl.queue.{ QueueItem, QueueStats }
-import org.scalatest.matchers.ShouldMatchers._
+import org.scalatest.Matchers._
 
 object BwlTestHelper {
   def waitForCondition(timeoutInMs: Long = 2000L, sleepTimeInMs: Long = 50L)(predicate: => Boolean) {

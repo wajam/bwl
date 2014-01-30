@@ -6,7 +6,7 @@ import org.scalatest.FlatSpec
 import scala.concurrent.ExecutionContext
 import org.mockito.ArgumentCaptor
 import org.mockito.Mockito._
-import org.scalatest.matchers.ShouldMatchers._
+import org.scalatest.Matchers._
 import com.wajam.bwl.queue.QueueItem
 import com.wajam.nrv.data.InMessage
 import com.wajam.nrv.consistency.ResolvedServiceMember

@@ -6,7 +6,7 @@ import org.scalatest.FlatSpec
 import com.wajam.bwl.ClosableIterator._
 import com.wajam.bwl.queue.QueueItem
 import com.wajam.nrv.data.InMessage
-import org.scalatest.matchers.ShouldMatchers._
+import org.scalatest.Matchers._
 import org.scalatest.mock.MockitoSugar
 import org.mockito.Mockito._
 import com.wajam.nrv.consistency.replication.ReplicationSourceIterator
