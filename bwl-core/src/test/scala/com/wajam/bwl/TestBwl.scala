@@ -12,7 +12,7 @@ import org.mockito.Mockito._
 import org.mockito.ArgumentCaptor
 import scala.collection.JavaConversions._
 import scala.util.Random
-import com.wajam.tracing.{ Annotation, TraceContext, Record }
+import com.wajam.tracing.{ Annotation, Record }
 
 @RunWith(classOf[JUnitRunner])
 class TestBwl extends FunSuite {
@@ -25,8 +25,8 @@ class TestBwl extends FunSuite {
       new OkCallbackFixture with BwlFixture with SinglePriorityQueueFixture {}.runWithFixture((f) => {
         import ExecutionContext.Implicits.global
 
-        f.bwl.enqueue(0, f.definitions.head.name, "hello")
-        verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))(anyObject())
+        val taskId = Await.result(f.bwl.enqueue(0, f.definitions.head.name, "hello"), 500 milliseconds)
+        verify(f.mockCallback, timeout(2000)).execute(argEquals(taskId), argEquals("hello"), argEquals(0))(anyObject())
         verifyNoMoreInteractions(f.mockCallback)
       })
     }
@@ -47,7 +47,7 @@ class TestBwl extends FunSuite {
         Await.result(Future.sequence(enqueued), 5.seconds)
 
         val dataCaptor = ArgumentCaptor.forClass(classOf[Map[String, Any]])
-        verify(f.mockCallback, timeout(5000).atLeast(100)).execute(dataCaptor.capture())(anyObject())
+        verify(f.mockCallback, timeout(5000).atLeast(100)).execute(anyObject(), dataCaptor.capture(), argEquals(0))(anyObject())
 
         val values = dataCaptor.getAllValues.toList.take(100)
         val p1Count = values.map(_("p")).count(_ == 1)
@@ -71,8 +71,8 @@ class TestBwl extends FunSuite {
     new OkCallbackFixture with BwlFixture with SinglePriorityQueueFixture {}.runWithFixture((f) => {
       import ExecutionContext.Implicits.global
 
-      f.bwl.enqueue(0, f.definitions.head.name, "hello")
-      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))(anyObject())
+      val taskId = Await.result(f.bwl.enqueue(0, f.definitions.head.name, "hello"), 500 milliseconds)
+      verify(f.mockCallback, timeout(2000)).execute(argEquals(taskId), argEquals("hello"), argEquals(0))(anyObject())
 
       val spyQueue = spyQueueFactory.allQueues.head
       val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -100,8 +100,8 @@ class TestBwl extends FunSuite {
 
       f.bwl.applySupport(responseTimeout = Some(200L))
 
-      f.bwl.enqueue(0, f.definitions.head.name, "hello")
-      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))(anyObject())
+      val taskId = Await.result(f.bwl.enqueue(0, f.definitions.head.name, "hello"), 500 milliseconds)
+      verify(f.mockCallback, timeout(2000)).execute(argEquals(taskId), argEquals("hello"), argEquals(0))(anyObject())
 
       val spyQueue = spyQueueFactory.allQueues.head
       val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -135,8 +135,8 @@ class TestBwl extends FunSuite {
     }.runWithFixture((f) => {
       import ExecutionContext.Implicits.global
 
-      f.bwl.enqueue(0, f.definitions.head.name, "hello")
-      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))(anyObject())
+      val taskId = Await.result(f.bwl.enqueue(0, f.definitions.head.name, "hello"), 500 milliseconds)
+      verify(f.mockCallback, timeout(2000)).execute(argEquals(taskId), argEquals("hello"), argEquals(0))(anyObject())
 
       val spyQueue = spyQueueFactory.allQueues.head
 
@@ -160,8 +160,8 @@ class TestBwl extends FunSuite {
       // Set a zero timeout at the service level
       f.bwl.applySupport(responseTimeout = Some(0))
 
-      f.bwl.enqueue(0, f.definitions.head.name, "hello")
-      verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))(anyObject())
+      val taskId = Await.result(f.bwl.enqueue(0, f.definitions.head.name, "hello"), 500 milliseconds)
+      verify(f.mockCallback, timeout(2000)).execute(argEquals(taskId), argEquals("hello"), argEquals(0))(anyObject())
 
       val spyQueue = spyQueueFactory.allQueues.head
       val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -189,8 +189,8 @@ class TestBwl extends FunSuite {
       new ErrorCallbackFixture(result, useResultException) with BwlFixture with SinglePriorityQueueFixture {}.runWithFixture((f) => {
         import ExecutionContext.Implicits.global
 
-        f.bwl.enqueue(0, f.definitions.head.name, "hello")
-        verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))(anyObject())
+        val taskId = Await.result(f.bwl.enqueue(0, f.definitions.head.name, "hello"), 500 milliseconds)
+        verify(f.mockCallback, timeout(2000)).execute(argEquals(taskId), argEquals("hello"), argEquals(0))(anyObject())
 
         val spyQueue = spyQueueFactory.allQueues.head
         val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -218,8 +218,8 @@ class TestBwl extends FunSuite {
       new ErrorCallbackFixture(result, useResultException) with BwlFixture with SinglePriorityQueueFixture {}.runWithFixture((f) => {
         import ExecutionContext.Implicits.global
 
-        f.bwl.enqueue(0, f.definitions.head.name, "hello")
-        verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))(anyObject())
+        val taskId = Await.result(f.bwl.enqueue(0, f.definitions.head.name, "hello"), 500 milliseconds)
+        verify(f.mockCallback, timeout(2000)).execute(argEquals(taskId), argEquals("hello"), argEquals(0))(anyObject())
 
         val spyQueue = spyQueueFactory.allQueues.head
         val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -248,8 +248,8 @@ class TestBwl extends FunSuite {
 
         f.bwl.applySupport(responseTimeout = Some(200L))
 
-        f.bwl.enqueue(0, f.definitions.head.name, "hello")
-        verify(f.mockCallback, timeout(2000)).execute(argEquals("hello"))(anyObject())
+        val taskId = Await.result(f.bwl.enqueue(0, f.definitions.head.name, "hello"), 500 milliseconds)
+        verify(f.mockCallback, timeout(2000)).execute(argEquals(taskId), argEquals("hello"), argEquals(0))(anyObject())
 
         val spyQueue = spyQueueFactory.allQueues.head
         val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -282,10 +282,10 @@ class TestBwl extends FunSuite {
       new ErrorCallbackFixture(result, useResultException) with BwlFixture with SinglePriorityQueueFixture {}.runWithFixture((f) => {
         import ExecutionContext.Implicits.global
 
-        f.bwl.enqueue(0, f.definitions.head.name, "hello")
+        val taskId = Await.result(f.bwl.enqueue(0, f.definitions.head.name, "hello"), 500 milliseconds)
 
         // SPNL would retry forever but we stop waiting after the fifth callback invocation
-        verify(f.mockCallback, timeout(2000).atLeast(5)).execute(ArgumentCaptor.forClass(classOf[String]).capture())(anyObject())
+        verify(f.mockCallback, timeout(2000).atLeast(5)).execute(argEquals(taskId), ArgumentCaptor.forClass(classOf[String]).capture(), anyObject())(anyObject())
 
         val spyQueue = spyQueueFactory.allQueues.head
         val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -323,8 +323,11 @@ class TestBwl extends FunSuite {
       }.runWithFixture((f) => {
         import ExecutionContext.Implicits.global
 
-        f.bwl.enqueue(0, f.definitions.head.name, "hello")
-        verify(f.mockCallback, timeout(2000).times(1 + maxRetryCount)).execute(argEquals("hello"))(anyObject())
+        val taskId = Await.result(f.bwl.enqueue(0, f.definitions.head.name, "hello"), 500 milliseconds)
+        verify(f.mockCallback, timeout(2000)).execute(argEquals(taskId), argEquals("hello"), argEquals(0))(anyObject())
+        verify(f.mockCallback, timeout(2000)).execute(argEquals(taskId), argEquals("hello"), argEquals(1))(anyObject())
+        verify(f.mockCallback, timeout(2000)).execute(argEquals(taskId), argEquals("hello"), argEquals(2))(anyObject())
+        verify(f.mockCallback, timeout(2000)).execute(argEquals(taskId), argEquals("hello"), argEquals(3))(anyObject())
 
         val spyQueue = spyQueueFactory.allQueues.head
         val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -359,10 +362,10 @@ class TestBwl extends FunSuite {
       new ErrorCallbackFixture(result, useResultException) with BwlFixture with SinglePriorityQueueFixture {}.runWithFixture((f) => {
         import ExecutionContext.Implicits.global
 
-        f.bwl.enqueue(0, f.definitions.head.name, data, Some(priority))
+        val taskId = Await.result(f.bwl.enqueue(0, f.definitions.head.name, "hello"), 500 milliseconds)
 
         // Wait for the callback to be executed
-        verify(f.mockCallback, timeout(2000)).execute(ArgumentCaptor.forClass(classOf[String]).capture())(anyObject())
+        verify(f.mockCallback, timeout(2000)).execute(argEquals(taskId), ArgumentCaptor.forClass(classOf[String]).capture(), argEquals(0))(anyObject())
 
         val spyQueue = spyQueueFactory.allQueues.head
         val taskCaptor = ArgumentCaptor.forClass(classOf[QueueItem.Task])
@@ -401,7 +404,7 @@ class TestBwl extends FunSuite {
 
         val stringCaptor = ArgumentCaptor.forClass(classOf[String])
 
-        verify(f.mockCallback, timeout(2000).times(2)).execute(stringCaptor.capture())(anyObject())
+        verify(f.mockCallback, timeout(2000).times(2)).execute(anyObject(), stringCaptor.capture(), argEquals(0))(anyObject())
 
         stringCaptor.getAllValues.toList should be(List("hello", "good bye"))
       })

@@ -19,7 +19,7 @@ import org.mockito.Matchers._
 import com.wajam.bwl.queue.QueueDefinition
 import org.mockito.stubbing.Answer
 import org.mockito.invocation.InvocationOnMock
-import com.wajam.tracing.{ TraceRecorder, LoggingTraceRecorder, Tracer }
+import com.wajam.tracing.{ TraceRecorder, Tracer }
 
 trait BwlFixture extends CallbackFixture with MockitoSugar {
 
@@ -154,12 +154,12 @@ trait CallbackFixture extends MockitoSugar {
 
   def delay: Long
 
-  when(mockCallback.execute(anyObject())(anyObject())).thenAnswer(new Answer[Future[QueueCallback.Result]] {
+  when(mockCallback.execute(anyObject(), anyObject(), anyObject())(anyObject())).thenAnswer(new Answer[Future[QueueCallback.Result]] {
     import scala.concurrent.future
 
     def answer(iom: InvocationOnMock) = {
       val args = iom.getArguments
-      implicit val ec = args(1).asInstanceOf[ExecutionContext]
+      implicit val ec = args(3).asInstanceOf[ExecutionContext]
       future {
         Tracer.currentTracer.get.time("****: CallbackFixture.execute") {
           Thread.sleep(delay)
