@@ -161,7 +161,7 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
           def stop() = {}
           def explicitReplicasMapping = config.getBwlConsistencyExplicitReplicas
           def replicationLagSeconds(token: Long, node: Node) = None
-          def replicationLagSeconds_=(token: Long, node: Node, lag: Option[Int]) = {}
+          def updateReplicationLagSeconds(token: Long, node: Node, lag: Int) = {}
           def changeMasterServiceMember(token: Long, node: Node) = {}
         },
         config.getBwlConsistencyLogDirectory,
