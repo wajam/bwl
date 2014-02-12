@@ -13,7 +13,7 @@ import com.wajam.commons.Logging
 import scala.util.Random
 import com.yammer.metrics.scala.{ Timer, Counter, Instrumented }
 import com.yammer.metrics.core.Gauge
-import com.wajam.tracing.{ TracingExecutionContext, Tracer }
+import com.wajam.tracing.TracingExecutionContext
 
 class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefinition],
           protected val queueFactory: QueueFactory, callbackExecutor: ExecutionContext,
@@ -171,7 +171,7 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
         }
       }
 
-      val response = definition.callback.execute(data.values("data")).recover {
+      val response = definition.callback.execute(taskId, data.values("data"), data.retryCount).recover {
         case e: QueueCallback.ResultException => {
           info("Callback error: ", e)
           e.result

@@ -116,7 +116,7 @@ trait QueueFactory {
 }
 
 trait QueueCallback {
-  def execute(data: Any)(implicit ec: ExecutionContext): Future[QueueCallback.Result]
+  def execute(taskId: Long, data: Any, retryCount: Int)(implicit ec: ExecutionContext): Future[QueueCallback.Result]
 }
 
 object QueueCallback {
