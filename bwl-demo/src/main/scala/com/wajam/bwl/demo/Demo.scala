@@ -156,14 +156,7 @@ class DemoServer(config: DemoConfig)(implicit ec: ExecutionContext) extends Logg
 
       val consistency = new ConsistencyMasterSlave(
         scnClient,
-        new ConsistencyPersistence {
-          def start() = {}
-          def stop() = {}
-          def explicitReplicasMapping = config.getBwlConsistencyExplicitReplicas
-          def replicationLagSeconds(token: Long, node: Node) = None
-          def updateReplicationLagSeconds(token: Long, node: Node, lag: Int) = {}
-          def changeMasterServiceMember(token: Long, node: Node) = {}
-        },
+        ConsistencyPersistence.Noop,
         config.getBwlConsistencyLogDirectory,
         txLogEnabled = true,
         replicationResolver = Some(new ExplicitReplicaResolver(config.getBwlConsistencyExplicitReplicas, service.resolver)))
