@@ -22,9 +22,11 @@ trait ConsistentBwl extends ConsistentStore with Startable {
   // Mapping between token ranges and service member to speedup lookup.
   private var rangeMembers: Map[TokenRange, ServiceMember] = Map()
 
-  private def updateRangeMemberCache() {
+  private def updateRangeMemberCache(): Unit = {
     rangeMembers = service.members.flatMap(member => service.getMemberTokenRanges(member).map((_, member))).toMap
   }
+
+  def invalidateCache(): Unit = {}
 
   /**
    * Returns true if the specified message is an enqueue or ack message referring to a consistent queue.
