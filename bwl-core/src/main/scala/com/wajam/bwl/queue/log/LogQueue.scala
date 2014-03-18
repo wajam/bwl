@@ -553,6 +553,8 @@ object LogQueue {
    * failing ensure awareness if they are in the future.
    */
   private[log] object DummyTruncatableConsistentStore extends ConsistentStore {
+    def invalidateCache() = ???
+
     def requiresConsistency(message: Message) = ???
 
     def getLastTimestamp(ranges: Seq[TokenRange]) = ???
