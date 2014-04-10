@@ -23,35 +23,44 @@ class DelayedTaskIterator(itr: Iterator[Option[QueueItem.Task]], clock: CurrentT
   def hasNext = itr.hasNext || _delayedTasks.nonEmpty
 
   def next(): Option[QueueItem.Task] = {
+    getNext().result
+  }
+
+  import scala.util.control.TailCalls._
+
+  private def getNext(): TailRec[Option[QueueItem.Task]] = {
     _delayedTasks.headOption match {
       case Some(((scheduleTime, taskId), task)) if isReady(scheduleTime) =>
         // The most urgent delayed task is ready: return it
         _delayedTasks -= ((scheduleTime, taskId))
-        Some(task)
+        done(Some(task))
       case _ if itr.hasNext =>
         // No delayed task ready to be returned: get next from wrapped iterator
-        itr.next().flatMap { task =>
-          instrument {
-            dequeuesMeters(task.priority).mark()
-            taskWaitTimer.update(clock.currentTime - task.createTime, TimeUnit.MILLISECONDS)
+        itr.next() match {
+          case Some(task) => {
+            instrument {
+              dequeuesMeters(task.priority).mark()
+              taskWaitTimer.update(clock.currentTime - task.createTime, TimeUnit.MILLISECONDS)
+            }
+            task.scheduleTime match {
+              case None =>
+                // Task is not delayed: return it
+                done(Some(task))
+              case Some(scheduleTime) if isReady(scheduleTime) =>
+                // Task is delayed but ready to be executed: return it
+                done(Some(task))
+              case Some(scheduleTime) =>
+                // Task is delayed: save it and go to next
+                instrument { taskDelayedTimer.update(scheduleTime - clock.currentTime, TimeUnit.MILLISECONDS) }
+                _delayedTasks += (scheduleTime, task.taskId) -> task
+                tailcall(getNext())
+            }
           }
-          task.scheduleTime match {
-            case None =>
-              // Task is not delayed: return it
-              Some(task)
-            case Some(scheduleTime) if isReady(scheduleTime) =>
-              // Task is delayed but ready to be executed: return it
-              Some(task)
-            case Some(scheduleTime) =>
-              // Task is delayed: save it and go to next
-              instrument { taskDelayedTimer.update(scheduleTime - clock.currentTime, TimeUnit.MILLISECONDS) }
-              _delayedTasks += (scheduleTime, task.taskId) -> task
-              next()
-          }
+          case None => done(None)
         }
       case _ if _delayedTasks.nonEmpty =>
         // Wrapped iterator is empty but we have delayed tasks: return None
-        None
+        done(None)
       case _ =>
         // Wrapped iterator is empty and we don't have delayed tasks: error
         throw new NoSuchElementException
