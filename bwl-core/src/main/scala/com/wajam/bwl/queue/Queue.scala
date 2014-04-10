@@ -144,8 +144,8 @@ object QueueCallback {
 
   private def resultMessage(message: String, result: QueueCallback.ResultError): String = {
     result match {
-      case f: QueueCallback.Result.Fail => s"Fail(ignore=${f.ignore}}): $message"
-      case tl: QueueCallback.Result.TryLater => s"TryLater(delay=${tl.delay}}): $message"
+      case f: QueueCallback.Result.Fail => s"Fail(ignore=${f.ignore}): $message"
+      case tl: QueueCallback.Result.TryLater => s"TryLater(delay=${tl.delay}): $message"
     }
   }
 }
