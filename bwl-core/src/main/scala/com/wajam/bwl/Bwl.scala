@@ -18,7 +18,7 @@ import com.wajam.tracing.TracingExecutionContext
 class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefinition],
           protected val queueFactory: QueueFactory, callbackExecutor: ExecutionContext,
           spnl: Spnl, taskPersistenceFactory: TaskPersistenceFactory = new NoTaskPersistenceFactory)(implicit random: Random = Random)
-    extends Service(serviceName) with Logging {
+    extends Service(serviceName) with Instrumented with Logging {
 
   protected[bwl] def getMetricsClass: Class[_] = classOf[Bwl]
 
@@ -35,6 +35,8 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
       queue.stop()
     }
   }
+
+  private lazy val ackErrorMeter = metrics.meter("ack-error", "ack-error")
 
   private var internalQueues: Map[(Long, String), QueueWrapper] = Map()
 
@@ -109,7 +111,12 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
     val action = queueResource.delete(this).get
 
     val params = List[(String, MValue)](TaskToken -> token, QueueName -> name, TaskId -> id, TaskPriority -> priority)
-    val result = action.call(params = params, meta = Map(), data = null)
+    val result = action.call(params = params, meta = Map(), data = null) recover {
+      case e: Exception => {
+        ackErrorMeter.mark()
+        warn(s"Unable to acknowledge task: $params", e)
+      }
+    }
     result.map(_ => Unit)
   }
 

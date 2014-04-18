@@ -126,7 +126,7 @@ class TestDelayedTaskIterator extends FlatSpec {
 
     itr.take(20).toList should be(tasks)
   }
-  
+
   it should "NOT overflow when reading many contiguous delayed tasks" in {
     val clock = new ControlableCurrentTime {}
     val delay = 5000L
@@ -139,7 +139,7 @@ class TestDelayedTaskIterator extends FlatSpec {
       taskId += 1L
       if (taskId % 5000 == 0) {
         val someTask = Some(task(taskId, 1, None))
-        expectedTasks =  someTask +: expectedTasks
+        expectedTasks = someTask +: expectedTasks
         someTask
       } else {
         val someTask = Some(task(taskId, 1, Some(clock.currentTime + delay)))
