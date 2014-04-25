@@ -33,8 +33,8 @@ trait QueueMetrics extends DelayedTaskMetrics { this: Queue =>
     val totalTasksGauge = metrics.gauge("total-tasks", scope) {
       stats.totalTasks
     }
-    val pendingTasksGauge = metrics.gauge("pending-tasks", scope) {
-      stats.pendingTasks.size
+    val processingTasksGauge = metrics.gauge("processing-tasks", scope) {
+      stats.processingTasks.size
     }
     val delayedTasksGauge = metrics.gauge("delayed-tasks", scope) {
       stats.delayedTasks.size

@@ -29,7 +29,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
     case (priority, queue) =>
       priority -> Iterator.continually(Option(queue.poll()))
   }
-  private var pendingTasks: Map[Timestamp, QueueItem.Task] = TreeMap()
+  private var processingTasks: Map[Timestamp, QueueItem.Task] = TreeMap()
 
   private val delayedTaskIterator = new DelayedTaskIterator(new PrioritizedIterator(queuesIterators, definition.priorities), clock)
 
@@ -67,7 +67,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
 
     def next(): Option[FeederData] = {
       taskIterator.next().map { item =>
-        pendingTasks += item.taskId -> item
+        processingTasks += item.taskId -> item
         item.toFeederData
       }
     }
@@ -75,13 +75,13 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
     def ack(data: FeederData) {
       instrument { acksMeter.mark() }
       val taskId = data(TaskId).toString.toLong
-      if (isPending(taskId)) totalTaskCount.decrementAndGet()
-      pendingTasks -= taskId
+      if (isProcessing(taskId)) totalTaskCount.decrementAndGet()
+      processingTasks -= taskId
     }
 
     def kill() {}
 
-    def isPending(taskId: Timestamp): Boolean = pendingTasks.contains(taskId)
+    def isProcessing(taskId: Timestamp): Boolean = processingTasks.contains(taskId)
   }
 
   def stats: QueueStats = MemoryQueueStats
@@ -93,7 +93,7 @@ class MemoryQueue(val token: Long, val definition: QueueDefinition)(implicit ran
   private object MemoryQueueStats extends QueueStats {
     def totalTasks = totalTaskCount.get()
 
-    def pendingTasks = self.pendingTasks.values
+    def processingTasks = self.processingTasks.values
 
     def delayedTasks = delayedTaskIterator.delayedTasks.toIterable
   }

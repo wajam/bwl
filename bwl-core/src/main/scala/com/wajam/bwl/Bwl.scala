@@ -265,8 +265,8 @@ class Bwl(serviceName: String, protected val definitions: Iterable[QueueDefiniti
     val globalTotalTasksGauge = gauge("total-tasks") {
       queueStats.map(_.totalTasks).reduceOption(_ + _).getOrElse(0)
     }
-    val globalPendingTasksGauge = gauge("pending-tasks") {
-      queueStats.map(_.pendingTasks.size).reduceOption(_ + _).getOrElse(0)
+    val globalProcessingTasksGauge = gauge("processing-tasks") {
+      queueStats.map(_.processingTasks.size).reduceOption(_ + _).getOrElse(0)
     }
     val globalDelayedTasksGauge = gauge("delayed-tasks") {
       queueStats.map(_.delayedTasks.size).reduceOption(_ + _).getOrElse(0)

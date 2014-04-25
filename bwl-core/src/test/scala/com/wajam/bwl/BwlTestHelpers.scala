@@ -52,14 +52,14 @@ object QueueStatsHelper {
   implicit class QueueStatsVerifier(stats: QueueStats) extends QueueStats {
     def totalTasks = stats.totalTasks
 
-    def pendingTasks = stats.pendingTasks
+    def processingTasks = stats.processingTasks
 
     def delayedTasks = stats.delayedTasks
 
-    def verifyEqualsTo(totalTasks: Int, pendingTasks: Iterable[QueueItem.Task] = Nil,
+    def verifyEqualsTo(totalTasks: Int, processingTasks: Iterable[QueueItem.Task] = Nil,
                        delayedTasks: Iterable[QueueItem.Task] = Nil) {
       stats.totalTasks should be(totalTasks)
-      stats.pendingTasks.toList should be(pendingTasks.toList)
+      stats.processingTasks.toList should be(processingTasks.toList)
       stats.delayedTasks.toList should be(delayedTasks.toList)
     }
   }

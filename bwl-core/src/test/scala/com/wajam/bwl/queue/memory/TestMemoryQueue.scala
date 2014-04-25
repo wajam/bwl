@@ -31,7 +31,7 @@ class TestMemoryQueue extends FlatSpec with MockitoSugar {
   "Queue" should "enqueue and produce tasks" in new WithQueue {
     // Verification before enqueue
     queue.feeder.take(20).flatten.toList should be(Nil)
-    queue.stats.verifyEqualsTo(totalTasks = 0, pendingTasks = Nil)
+    queue.stats.verifyEqualsTo(totalTasks = 0, processingTasks = Nil)
 
     // Enqueue
     val t1 = queue.enqueue(task(taskId = 1L, priority = 1))
@@ -39,9 +39,9 @@ class TestMemoryQueue extends FlatSpec with MockitoSugar {
     val t3 = queue.enqueue(task(taskId = 3L, priority = 1))
 
     // Verification after enqueue
-    queue.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = Nil)
+    queue.stats.verifyEqualsTo(totalTasks = 3, processingTasks = Nil)
     queue.feeder.take(20).flatten.toList should be(List(t1, t2, t3).map(_.toFeederData))
-    queue.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = List(t1, t2, t3))
+    queue.stats.verifyEqualsTo(totalTasks = 3, processingTasks = List(t1, t2, t3))
   }
 
   it should "peek without affecting queue state" in new WithQueue {
@@ -50,17 +50,17 @@ class TestMemoryQueue extends FlatSpec with MockitoSugar {
     val t2 = queue.enqueue(task(taskId = 2L, priority = 1))
     val t3 = queue.enqueue(task(taskId = 3L, priority = 1))
 
-    queue.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = Nil)
+    queue.stats.verifyEqualsTo(totalTasks = 3, processingTasks = Nil)
 
     waitForFeederData(queue.feeder)
 
     queue.feeder.peek() should be(Some(t1.toFeederData))
     queue.feeder.peek() should be(Some(t1.toFeederData))
 
-    queue.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = Nil)
+    queue.stats.verifyEqualsTo(totalTasks = 3, processingTasks = Nil)
   }
 
-  it should "properly acknowledge the pending tasks" in new WithQueue {
+  it should "properly acknowledge the processing tasks" in new WithQueue {
     // Enqueue
     val t1 = queue.enqueue(task(taskId = 1L, priority = 1))
     val t2 = queue.enqueue(task(taskId = 2L, priority = 1))
@@ -72,19 +72,19 @@ class TestMemoryQueue extends FlatSpec with MockitoSugar {
     queue.ack(t2.toAck(ackId = 4L))
     queue.feeder.ack(t2.toFeederData)
 
-    queue.stats.verifyEqualsTo(totalTasks = 2, pendingTasks = List(t1, t3))
+    queue.stats.verifyEqualsTo(totalTasks = 2, processingTasks = List(t1, t3))
 
     // Acknowledge t1
     queue.ack(t1.toAck(ackId = 4L))
     queue.feeder.ack(t1.toFeederData)
 
-    queue.stats.verifyEqualsTo(totalTasks = 1, pendingTasks = List(t3))
+    queue.stats.verifyEqualsTo(totalTasks = 1, processingTasks = List(t3))
 
     // Acknowledge t3
     queue.ack(t3.toAck(ackId = 4L))
     queue.feeder.ack(t3.toFeederData)
 
-    queue.stats.verifyEqualsTo(totalTasks = 0, pendingTasks = Nil)
+    queue.stats.verifyEqualsTo(totalTasks = 0, processingTasks = Nil)
   }
 
   it should "produce expected task priority distribution" in {
