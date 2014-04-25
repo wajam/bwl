@@ -93,7 +93,7 @@ class TestLogQueue extends FlatSpec {
 
       // Verification before enqueue
       queue1.feeder.take(20).flatten.toList should be(Nil)
-      queue1.stats.verifyEqualsTo(totalTasks = 0, pendingTasks = Nil)
+      queue1.stats.verifyEqualsTo(totalTasks = 0, processingTasks = Nil)
 
       // Enqueue out of order
       val t3 = queue1.enqueue(task(taskId = 3L, priority = 1))
@@ -102,32 +102,32 @@ class TestLogQueue extends FlatSpec {
       waitForFeederData(queue1.feeder)
 
       // Verification after enqueue
-      queue1.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = Nil)
+      queue1.stats.verifyEqualsTo(totalTasks = 3, processingTasks = Nil)
       queue1.feeder.take(20).flatten.toList should be(List(t1, t2, t3).map(_.toFeederData))
-      queue1.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = List(t1, t2, t3))
+      queue1.stats.verifyEqualsTo(totalTasks = 3, processingTasks = List(t1, t2, t3))
       queue1.stop()
 
       // ####################
       // Create a new queue instance without acknowledging any tasks. Should reload the same state.
       val queue2 = createQueue()
       waitForFeederData(queue2.feeder)
-      queue2.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = Nil)
+      queue2.stats.verifyEqualsTo(totalTasks = 3, processingTasks = Nil)
       queue2.feeder.take(20).flatten.toList should be(List(t1, t2, t3).map(_.toFeederData))
-      queue2.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = List(t1, t2, t3))
+      queue2.stats.verifyEqualsTo(totalTasks = 3, processingTasks = List(t1, t2, t3))
 
       // Ack second task (queue + feeder)
       val a4 = queue2.ack(t2.toAck(ackId = 4L))
       queue2.feeder.ack(t2.toFeederData)
-      queue2.stats.verifyEqualsTo(totalTasks = 2, pendingTasks = List(t1, t3))
+      queue2.stats.verifyEqualsTo(totalTasks = 2, processingTasks = List(t1, t3))
       queue2.stop()
 
       // ####################
       // Create a new queue instance again. Should reload the state after task ack.
       val queue3 = createQueue()
       waitForFeederData(queue3.feeder)
-      queue3.stats.verifyEqualsTo(totalTasks = 2, pendingTasks = Nil)
+      queue3.stats.verifyEqualsTo(totalTasks = 2, processingTasks = Nil)
       queue3.feeder.take(20).flatten.toList should be(List(t1, t3).map(_.toFeederData))
-      queue3.stats.verifyEqualsTo(totalTasks = 2, pendingTasks = List(t1, t3))
+      queue3.stats.verifyEqualsTo(totalTasks = 2, processingTasks = List(t1, t3))
 
       // ####################
       // Truncate the ack and another task. After reloading the queue again, the ack task should resurect and the
@@ -138,9 +138,9 @@ class TestLogQueue extends FlatSpec {
 
       val queue4 = createQueue()
       waitForFeederData(queue4.feeder)
-      queue4.stats.verifyEqualsTo(totalTasks = 2, pendingTasks = Nil)
+      queue4.stats.verifyEqualsTo(totalTasks = 2, processingTasks = Nil)
       queue4.feeder.take(20).flatten.toList should be(List(t2, t3).map(_.toFeederData))
-      queue4.stats.verifyEqualsTo(totalTasks = 2, pendingTasks = List(t2, t3))
+      queue4.stats.verifyEqualsTo(totalTasks = 2, processingTasks = List(t2, t3))
     })
   }
 
@@ -161,23 +161,23 @@ class TestLogQueue extends FlatSpec {
       waitForFeederData(queue1.feeder)
 
       // Verification after enqueue
-      queue1.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = Nil, delayedTasks = List(t1))
+      queue1.stats.verifyEqualsTo(totalTasks = 3, processingTasks = Nil, delayedTasks = List(t1))
       queue1.feeder.take(20).flatten.toList should be(List(t2, t3).map(_.toFeederData))
-      queue1.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = List(t2, t3), delayedTasks = List(t1))
+      queue1.stats.verifyEqualsTo(totalTasks = 3, processingTasks = List(t2, t3), delayedTasks = List(t1))
       queue1.stop()
 
       // ####################
       // Create a new queue instance without acknowledging any tasks. Should reload the same state.
       val queue2 = createQueue()
       waitForFeederData(queue2.feeder)
-      queue2.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = Nil, delayedTasks = List(t1))
+      queue2.stats.verifyEqualsTo(totalTasks = 3, processingTasks = Nil, delayedTasks = List(t1))
       queue2.feeder.take(20).flatten.toList should be(List(t2, t3).map(_.toFeederData))
-      queue2.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = List(t2, t3), delayedTasks = List(t1))
+      queue2.stats.verifyEqualsTo(totalTasks = 3, processingTasks = List(t2, t3), delayedTasks = List(t1))
 
       clock.advanceTime(delay)
 
       queue2.feeder.take(20).flatten.toList should be(List(t1).map(_.toFeederData))
-      queue2.stats.verifyEqualsTo(totalTasks = 3, pendingTasks = List(t1, t2, t3), delayedTasks = Nil)
+      queue2.stats.verifyEqualsTo(totalTasks = 3, processingTasks = List(t1, t2, t3), delayedTasks = Nil)
     })
   }
 

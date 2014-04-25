@@ -377,7 +377,7 @@ class LogQueue(val token: Long, val definition: QueueDefinition, recorderFactory
   private object LogQueueStats extends QueueStats {
     def totalTasks = totalTaskCount.get()
 
-    def pendingTasks = feeder.pendingTasks.toIterable
+    def processingTasks = feeder.pendingTasks.toIterable
 
     def delayedTasks = feeder.delayedTasks.toIterable
   }

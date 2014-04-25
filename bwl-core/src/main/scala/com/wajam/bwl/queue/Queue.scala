@@ -59,7 +59,7 @@ object QueueItem {
 trait QueueStats {
   def totalTasks: Int
 
-  def pendingTasks: Iterable[QueueItem.Task]
+  def processingTasks: Iterable[QueueItem.Task]
 
   def delayedTasks: Iterable[QueueItem.Task]
 }
