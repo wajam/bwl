@@ -10,7 +10,8 @@ import com.wajam.nrv.utils.timestamp.Timestamp
 import com.wajam.spnl.feeder.Feeder
 import com.wajam.spnl.feeder.Feeder._
 import com.wajam.spnl.TaskContext
-import com.wajam.bwl.utils.{ PrioritizedIterator, QueueMetrics, PeekIterator, DelayedTaskIterator }
+import com.wajam.bwl.utils.{ PrioritizedIterator, QueueMetrics, DelayedTaskIterator }
+import com.wajam.commons.PeekIterator
 import com.wajam.bwl.queue._
 import com.wajam.bwl.QueueResource._
 import com.wajam.bwl.queue.QueueDefinition

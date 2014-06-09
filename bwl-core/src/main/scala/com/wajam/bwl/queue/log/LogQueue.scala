@@ -19,7 +19,8 @@ import scala.annotation.tailrec
 import com.wajam.nrv.consistency.log.LogRecord.Index
 import com.wajam.commons.{ Closable, Logging, CurrentTime }
 import LogQueue._
-import com.wajam.bwl.utils.{ PeekIterator, LogQueueMetrics, DisabledMetrics }
+import com.wajam.bwl.utils.{ LogQueueMetrics, DisabledMetrics }
+import com.wajam.commons.PeekIterator
 import scala.concurrent.ExecutionContext
 import java.util.concurrent.{ TimeUnit, Executors }
 

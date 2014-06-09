@@ -1,6 +1,6 @@
 package com.wajam.bwl.queue.log
 
-import com.wajam.commons.CurrentTime
+import com.wajam.commons.{ PeekIterator, CurrentTime }
 import com.wajam.spnl.feeder.Feeder
 import com.wajam.bwl.queue.QueueItem
 import scala.collection.immutable.TreeMap
