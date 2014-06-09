@@ -4,7 +4,7 @@ import com.wajam.bwl.queue.QueueItem
 import com.wajam.commons.Closable
 import com.wajam.nrv.consistency.replication.ReplicationSourceIterator
 import com.wajam.bwl.queue.log.LogQueue._
-import com.wajam.bwl.utils.PeekIterator
+import com.wajam.commons.PeekIterator
 import com.wajam.nrv.utils.timestamp.Timestamp
 
 /**

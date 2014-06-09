@@ -8,7 +8,7 @@ import com.wajam.bwl.queue.{ Queue, QueueItem, ConsistentQueue }
 import com.wajam.nrv.extension.resource.ParamsAccessor
 import com.wajam.nrv.extension.resource.ParamsAccessor._
 import com.wajam.bwl.QueueResource._
-import com.wajam.bwl.utils.{ ClosablePeekIterator, PeekIterator }
+import com.wajam.commons.{ ClosablePeekIterator, PeekIterator }
 import com.wajam.commons.Closable
 import com.wajam.nrv.utils.Startable
 

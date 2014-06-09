@@ -2,7 +2,8 @@ package com.wajam.bwl.queue
 
 import com.wajam.spnl.feeder.Feeder
 import com.wajam.nrv.utils.timestamp.Timestamp
-import com.wajam.bwl.utils.{ PeekIteratorOrdering, WeightedItemsSelector }
+import com.wajam.bwl.utils.WeightedItemsSelector
+import com.wajam.commons.PeekIteratorOrdering
 import com.wajam.nrv.service.Service
 import com.wajam.spnl.TaskContext
 import scala.concurrent.{ ExecutionContext, Future }
